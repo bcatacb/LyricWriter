@@ -22,7 +22,27 @@ import LyricsDisplay from "../components/LyricsDisplay";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Textarea } from "../components/ui/textarea";
 
-const DEFAULT_SECTIONS = ["VERSE 1", "PRE-CHORUS", "CHORUS", "VERSE 2", "CHORUS", "BRIDGE", "CHORUS"];
+const DEFAULT_BARS = {
+    "VERSE": 16,
+    "VERSE 1": 16,
+    "VERSE 2": 16,
+    "PRE-CHORUS": 4,
+    "CHORUS": 8,
+    "BRIDGE": 8,
+    "HOOK": 8,
+    "OUTRO": 4,
+    "INTRO": 4,
+};
+
+const DEFAULT_SECTIONS = [
+    { type: "VERSE 1", bars: 16 },
+    { type: "PRE-CHORUS", bars: 4 },
+    { type: "CHORUS", bars: 8 },
+    { type: "VERSE 2", bars: 16 },
+    { type: "CHORUS", bars: 8 },
+    { type: "BRIDGE", bars: 8 },
+    { type: "CHORUS", bars: 8 },
+];
 const SECTION_PALETTE = ["VERSE", "PRE-CHORUS", "CHORUS", "BRIDGE", "HOOK", "OUTRO", "INTRO"];
 
 export default function StudioPage() {
@@ -38,6 +58,7 @@ export default function StudioPage() {
     const [notes, setNotes] = useState("");
     const [autoStructure, setAutoStructure] = useState(true);
     const [structure, setStructure] = useState(DEFAULT_SECTIONS);
+    const [defaultBars, setDefaultBars] = useState({ VERSE: 16, CHORUS: 8, BRIDGE: 8, "PRE-CHORUS": 4 });
 
     const [styles, setStyles] = useState([]);
     const [lyrics, setLyrics] = useState("");
@@ -93,6 +114,7 @@ export default function StudioPage() {
         try {
             const body = buildBody({
                 structure: autoStructure ? null : structure,
+                default_bars: autoStructure ? defaultBars : null,
                 extra_notes: notes,
             });
             await streamSSE(`${API}/lyrics/generate/stream`, body, {
@@ -203,6 +225,22 @@ export default function StudioPage() {
         [next[i], next[j]] = [next[j], next[i]];
         setStructure(next);
     };
+
+    const setSectionType = (i, newType) => {
+        const next = [...structure];
+        // auto-update bars to default for the new type if user hadn't customized much
+        next[i] = { type: newType, bars: DEFAULT_BARS[newType] ?? next[i].bars ?? 8 };
+        setStructure(next);
+    };
+
+    const setSectionBars = (i, value) => {
+        const n = parseInt(value, 10);
+        const next = [...structure];
+        next[i] = { ...next[i], bars: Number.isFinite(n) && n > 0 ? n : null };
+        setStructure(next);
+    };
+
+    const totalBars = structure.reduce((s, x) => s + (x.bars || 0), 0);
 
     return (
         <div className="max-w-[1600px] mx-auto px-6 py-8" data-testid="studio-page">
@@ -475,37 +513,86 @@ export default function StudioPage() {
 
                                 {!autoStructure && (
                                     <div className="space-y-2" data-testid="structure-builder">
+                                        <div className="grid grid-cols-[1.5rem_1fr_auto_auto_auto_auto] gap-2 text-[9px] font-mono tracking-[0.2em] uppercase text-[#666] px-1">
+                                            <span />
+                                            <span>Section</span>
+                                            <span className="text-right min-w-[70px]">Bars</span>
+                                            <span />
+                                            <span />
+                                            <span />
+                                        </div>
                                         {structure.map((sec, i) => (
-                                            <div key={i} className="flex items-center gap-2">
-                                                <span className="font-mono text-xs text-[#666] w-6">{String(i + 1).padStart(2, "0")}</span>
+                                            <div key={i} className="grid grid-cols-[1.5rem_1fr_auto_auto_auto_auto] items-center gap-2">
+                                                <span className="font-mono text-xs text-[#666]">{String(i + 1).padStart(2, "0")}</span>
                                                 <select
-                                                    value={sec}
-                                                    onChange={(e) => {
-                                                        const next = [...structure];
-                                                        next[i] = e.target.value;
-                                                        setStructure(next);
-                                                    }}
-                                                    className="flex-1 bg-[#0A0A0A] border border-[#222] text-[#EDEDED] px-2 py-1 text-xs font-mono focus:outline-none focus:border-[#39FF14]"
+                                                    value={sec.type}
+                                                    onChange={(e) => setSectionType(i, e.target.value)}
+                                                    className="bg-[#0A0A0A] border border-[#222] text-[#EDEDED] px-2 py-1 text-xs font-mono focus:outline-none focus:border-[#39FF14]"
                                                     data-testid={`structure-select-${i}`}
                                                 >
                                                     {SECTION_PALETTE.map((s) => (
                                                         <option key={s} value={s}>{s}</option>
                                                     ))}
+                                                    {!SECTION_PALETTE.includes(sec.type) && (
+                                                        <option value={sec.type}>{sec.type}</option>
+                                                    )}
                                                 </select>
-                                                <button onClick={() => moveStructure(i, -1)} className="text-[#666] hover:text-[#39FF14] px-1">▲</button>
-                                                <button onClick={() => moveStructure(i, 1)} className="text-[#666] hover:text-[#39FF14] px-1">▼</button>
-                                                <button onClick={() => setStructure(structure.filter((_, j) => j !== i))} className="text-[#666] hover:text-red-400 px-1">
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    max={64}
+                                                    value={sec.bars ?? ""}
+                                                    onChange={(e) => setSectionBars(i, e.target.value)}
+                                                    className="w-16 bg-[#0A0A0A] border border-[#222] text-[#39FF14] px-2 py-1 text-xs font-mono text-right focus:outline-none focus:border-[#39FF14]"
+                                                    data-testid={`structure-bars-${i}`}
+                                                    aria-label="bars"
+                                                />
+                                                <button onClick={() => moveStructure(i, -1)} className="text-[#666] hover:text-[#39FF14] px-1" data-testid={`structure-up-${i}`} aria-label="move up">▲</button>
+                                                <button onClick={() => moveStructure(i, 1)} className="text-[#666] hover:text-[#39FF14] px-1" data-testid={`structure-down-${i}`} aria-label="move down">▼</button>
+                                                <button onClick={() => setStructure(structure.filter((_, j) => j !== i))} className="text-[#666] hover:text-red-400 px-1" data-testid={`structure-remove-${i}`} aria-label="remove">
                                                     <XIcon size={12} />
                                                 </button>
                                             </div>
                                         ))}
                                         <button
-                                            onClick={() => setStructure([...structure, "VERSE"])}
+                                            onClick={() => setStructure([...structure, { type: "VERSE", bars: 16 }])}
                                             className="w-full border border-dashed border-[#333] text-[#666] hover:text-[#39FF14] hover:border-[#39FF14] py-2 text-xs font-mono uppercase tracking-widest flex items-center justify-center gap-1"
                                             data-testid="structure-add-btn"
                                         >
                                             <PlusIcon size={12} /> Add Section
                                         </button>
+                                        <div className="flex items-center justify-between pt-2 mt-2 border-t border-[#222] text-[10px] font-mono tracking-[0.2em] uppercase">
+                                            <span className="text-[#666]">Total</span>
+                                            <span className="text-[#39FF14]" data-testid="structure-total-bars">
+                                                {totalBars} bars / {totalBars} lines
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                                {autoStructure && (
+                                    <div className="space-y-2 pt-1" data-testid="default-bars-editor">
+                                        <div className="text-[10px] font-mono tracking-[0.25em] uppercase text-[#666]">
+                                            Preferred bars per section (when AI picks the structure)
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {["VERSE", "CHORUS", "PRE-CHORUS", "BRIDGE"].map((k) => (
+                                                <label key={k} className="flex items-center justify-between bg-[#0A0A0A] border border-[#222] px-2 py-1.5 text-xs">
+                                                    <span className="font-mono text-[#A0A0A0] uppercase tracking-widest text-[10px]">{k}</span>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        max={64}
+                                                        value={defaultBars[k] ?? ""}
+                                                        onChange={(e) => {
+                                                            const n = parseInt(e.target.value, 10);
+                                                            setDefaultBars({ ...defaultBars, [k]: Number.isFinite(n) && n > 0 ? n : null });
+                                                        }}
+                                                        className="w-14 bg-transparent border-b border-[#222] text-[#39FF14] text-right font-mono focus:outline-none focus:border-[#39FF14]"
+                                                        data-testid={`default-bars-${k.toLowerCase().replace(/[^a-z]/g, "-")}`}
+                                                    />
+                                                </label>
+                                            ))}
+                                        </div>
                                     </div>
                                 )}
                             </div>

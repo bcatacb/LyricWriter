@@ -7,8 +7,9 @@ Rules you must follow:
 2. Honor the requested theme and style.
 3. Weave in every must-have word or phrase naturally.
 4. Use clear section tags in the output: [VERSE 1], [PRE-CHORUS], [CHORUS], [VERSE 2], [BRIDGE], [OUTRO]. One tag per section on its own line.
-5. Keep syllable counts and stresses consistent within a section for singability.
-6. Absolutely no meta-commentary. Return ONLY the lyrics with section tags.
+5. BAR COUNTS ARE A HARD CONSTRAINT. When the user specifies a number of bars (or lines) for a section, produce EXACTLY that many. One bar = one line. Count your lines. Do not round, pad, or shorten. If you cannot meet the count, revise — do NOT deliver a different count.
+6. Keep syllable counts and stresses consistent within a section for singability.
+7. Absolutely no meta-commentary, no line numbers, no bar labels inside sections. Return ONLY the lyrics with section tags and the lines themselves.
 """
 
 
@@ -29,19 +30,55 @@ def _format_audio_block(audio: dict | None) -> str:
     return " | ".join(parts) if parts else "No audio metadata available."
 
 
+def _format_structure(structure) -> str:
+    """Accept list of strings OR list of {type, bars} dicts. Return bar-count-annotated block."""
+    if not structure:
+        return ""
+    lines = []
+    for i, item in enumerate(structure, 1):
+        if isinstance(item, dict):
+            typ = (item.get("type") or "VERSE").upper()
+            bars = item.get("bars")
+        else:
+            typ = str(item).upper()
+            bars = None
+        if bars:
+            lines.append(f"{i}. [{typ}] — EXACTLY {bars} bars ({bars} lines)")
+        else:
+            lines.append(f"{i}. [{typ}]")
+    return "\n".join(lines)
+
+
 def build_generate_prompt(
     audio: dict | None,
     theme: str,
     style: str,
     must_have_words: list[str],
-    structure: list[str] | None,
+    structure: list | None,
     extra_notes: str | None,
+    default_bars: dict | None = None,
 ) -> str:
     must = ", ".join(w for w in (must_have_words or []) if w) or "(none)"
     if structure:
-        struct_line = "Use EXACTLY this structure in order: " + " → ".join(structure)
+        struct_block = _format_structure(structure)
+        struct_line = (
+            "Use EXACTLY this structure in order, and EXACTLY the specified bar/line count per section:\n"
+            + struct_block
+            + "\n\nBAR COUNT VERIFICATION (critical): Before you finalize, count the lines in each section and confirm each matches. If any section is off, rewrite that section until the count is exact. One bar = one line."
+        )
     else:
-        struct_line = "Choose the best structure for this instrumental. Typical pop: Verse-PreChorus-Chorus-Verse-PreChorus-Chorus-Bridge-Chorus."
+        hint = ""
+        if default_bars:
+            hint = (
+                "\nWhen including these sections, use these preferred bar/line counts: "
+                + ", ".join(f"{k}={v}" for k, v in default_bars.items())
+                + "."
+            )
+        struct_line = (
+            "Choose the best structure for this instrumental. Typical pop: "
+            "Verse-PreChorus-Chorus-Verse-PreChorus-Chorus-Bridge-Chorus."
+            + hint
+        )
     notes = f"\nExtra notes: {extra_notes}" if extra_notes else ""
     return f"""Write complete original lyrics for the following instrumental.
 
@@ -50,10 +87,11 @@ Instrumental analysis: {_format_audio_block(audio)}
 Theme: {theme or "(let the music dictate it)"}
 Style: {style or "(match the instrumental)"}
 Must-have words/phrases: {must}
-Structure: {struct_line}
+Structure:
+{struct_line}
 {notes}
 
-Return only the lyrics with section tags.
+Return only the lyrics with section tags. One line per bar. Count your lines.
 """
 
 

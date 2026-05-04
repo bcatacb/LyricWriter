@@ -119,13 +119,20 @@ class StyleCreate(BaseModel):
     tags: List[str] = Field(default_factory=list)
 
 
+class StructureSection(BaseModel):
+    type: str
+    bars: Optional[int] = None
+
+
 class GenerateRequest(BaseModel):
     song_id: Optional[str] = None
     audio: Optional[AudioFeatures] = None
     theme: str = ""
     style: str = ""
     must_have_words: List[str] = Field(default_factory=list)
-    structure: Optional[List[str]] = None
+    # Accept either list[str] (legacy) or list[StructureSection-like dict]
+    structure: Optional[List] = None
+    default_bars: Optional[dict] = None
     extra_notes: Optional[str] = None
     provider: str = "anthropic"
     model: str = "claude-sonnet-4-5-20250929"
@@ -527,7 +534,8 @@ async def _resolve_audio(song_id: Optional[str], inline: Optional[AudioFeatures]
 async def lyrics_generate(req: GenerateRequest):
     audio = await _resolve_audio(req.song_id, req.audio)
     user_prompt = build_generate_prompt(
-        audio, req.theme, req.style, req.must_have_words, req.structure, req.extra_notes
+        audio, req.theme, req.style, req.must_have_words, req.structure,
+        req.extra_notes, req.default_bars,
     )
     try:
         text = await call_llm(
@@ -633,7 +641,8 @@ def _sse_stream(provider, model, system_prompt, user_prompt, session_id, endpoin
 async def lyrics_generate_stream(req: GenerateRequest):
     audio = await _resolve_audio(req.song_id, req.audio)
     user_prompt = build_generate_prompt(
-        audio, req.theme, req.style, req.must_have_words, req.structure, req.extra_notes
+        audio, req.theme, req.style, req.must_have_words, req.structure,
+        req.extra_notes, req.default_bars,
     )
     return _sse_stream(
         req.provider, req.model, SYSTEM_PROMPT, user_prompt,

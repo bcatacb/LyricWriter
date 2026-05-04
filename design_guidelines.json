@@ -1,0 +1,119 @@
+{
+  "theme": "dark",
+  "archetype": "7 (Electric & Neon)",
+  "design_concept": {
+    "vibe": "Modern DAW (Ableton/FL Studio/Bitwig) meets Cyberpunk Lyricist Notebook.",
+    "core_principles": [
+      "No pure black backgrounds (#0A0A0A instead) to avoid OLED smear, but maintain extreme high contrast against neon.",
+      "Technical Precision: Use monospace fonts for data (BPM, keys, tags) and high-density layouts.",
+      "Neon Tension: Green is the sole vibrant color, used strictly for active states, playheads, and primary CTAs.",
+      "Terminal/Grid aesthetics: Exposed borders, 1px lines, split-pane modular layouts. Ditch traditional rounded cards."
+    ]
+  },
+  "typography": {
+    "display": "Unbounded",
+    "body": "IBM Plex Sans",
+    "mono": "JetBrains Mono",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl font-black tracking-tighter uppercase text-[#EDEDED]",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight text-[#EDEDED]",
+      "h3": "text-lg sm:text-xl font-semibold tracking-tight text-[#39FF14]",
+      "body": "text-sm sm:text-base font-normal leading-relaxed text-[#A0A0A0]",
+      "label_mono": "text-xs font-mono tracking-[0.2em] uppercase text-[#666666]",
+      "data_mono": "text-sm font-mono text-[#39FF14]"
+    }
+  },
+  "colors": {
+    "background": {
+      "main": "#0A0A0A",
+      "surface": "#121212",
+      "panel_elevated": "#1E1E1E"
+    },
+    "text": {
+      "primary": "#EDEDED",
+      "secondary": "#A0A0A0",
+      "muted": "#666666",
+      "neon_accent": "#39FF14"
+    },
+    "border": {
+      "default": "#222222",
+      "active": "rgba(57, 255, 20, 0.4)",
+      "neon": "#39FF14"
+    },
+    "accent": {
+      "neon_green_primary": "#39FF14",
+      "neon_green_hover": "#00FF41",
+      "neon_green_dim": "rgba(57, 255, 20, 0.1)"
+    }
+  },
+  "layout": {
+    "spacing": "Dense 'Control Room' Grid (gap-4 or gap-6) for the workspace. Generous padding in editor panels (p-6).",
+    "panels": "Resizable split-panes mimicking DAWs. Example: Left (70%) for Waveform + Lyrics Editor, Right (30%) for AI Controls + Analysis.",
+    "borders": "Expose the grid. Use `border-collapse`, `border-r border-b border-[#222222]`."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#39FF14] text-black font-bold uppercase tracking-wide hover:bg-[#00FF41] hover:-translate-y-0.5 transition-all rounded-none px-6 py-3 shadow-[0_0_15px_rgba(57,255,20,0.3)]",
+      "secondary": "bg-transparent border border-[#39FF14] text-[#39FF14] hover:bg-[#39FF14]/10 transition-colors rounded-none px-6 py-3",
+      "ghost": "text-[#A0A0A0] hover:text-[#EDEDED] hover:bg-[#222222] rounded-sm transition-colors"
+    },
+    "inputs": {
+      "default": "bg-[#121212] border border-[#222222] text-[#EDEDED] focus:ring-1 focus:ring-[#39FF14] focus:border-[#39FF14] rounded-sm placeholder:text-[#666666]"
+    },
+    "surfaces": {
+      "glass": "backdrop-blur-xl bg-[#0A0A0A]/70 border border-white/5",
+      "panel": "bg-[#121212] border border-[#222222]"
+    },
+    "specific_features": {
+      "waveform": "Implement via Wavesurfer.js. waveColor: '#222222', progressColor: '#39FF14', cursorColor: '#FFFFFF', cursorWidth: 2.",
+      "lyric_editor": "Textarea with font-body. Inline section tags (e.g., [VERSE 1], [CHORUS]) should be visually distinct (highlighted in JetBrains Mono with green text).",
+      "audio_analysis_tags": "Small badges `border border-[#222222] bg-[#121212] px-2 py-1 text-xs font-mono text-[#A0A0A0]`"
+    }
+  },
+  "media": {
+    "images": [
+      {
+        "category": "hero_background",
+        "url": "https://images.pexels.com/photos/9404662/pexels-photo-9404662.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Dynamic neon green lines on dark background. Use with absolute positioning, object-cover, and opacity-20."
+      },
+      {
+        "category": "default_album_art",
+        "url": "https://images.unsplash.com/photo-1726383222152-134ad0536b76?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzB8MHwxfHNlYXJjaHwxfHxuZW9uJTIwZ3JlZW4lMjBhYnN0cmFjdHxlbnwwfHx8fDE3Nzc5MTU0NjJ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Green abstract object on black. Good for placeholder track artwork in the songbook library."
+      },
+      {
+        "category": "studio_empty_state",
+        "url": "https://images.unsplash.com/photo-1552174588-6733961c358e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwyfHxkYXJrJTIwcmVjb3JkaW5nJTIwc3R1ZGlvfGVufDB8fHx8MTc3NzkxNTQzNHww&ixlib=rb-4.1.0&q=85",
+        "description": "Black condenser mic on black background. Great for an 'empty state' background or dropzone."
+      }
+    ]
+  },
+  "motion": {
+    "rules": [
+      "Transitions: Fast and mechanical. 150ms-200ms ease-out.",
+      "Hover states: Sharp contrast changes, no soft fading.",
+      "Data updates: Flash text #EDEDED then fade to #39FF14 on value change."
+    ]
+  },
+  "icons": {
+    "library": "@phosphor-icons/react",
+    "instructions": "Use Phosphor icons with `weight=\"duotone\"` or `weight=\"bold\"` depending on scale. Run `yarn add @phosphor-icons/react`."
+  },
+  "accessibility": {
+    "rules": [
+      "Ensure neon green (#39FF14) against dark background (#0A0A0A) passes APCA.",
+      "All interactive elements and testable states MUST include `data-testid` attribute.",
+      "Focus states MUST use high contrast `focus:ring-[#39FF14]`."
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Run `yarn add @phosphor-icons/react wavesurfer.js` before starting development.",
+    "Do NOT use 'Inter', 'Roboto'. Override fonts in Tailwind: sans -> IBM Plex Sans, mono -> JetBrains Mono, display -> Unbounded.",
+    "UI must feel like a DAW (Control Room Grid). Prioritize strict geometric alignments and split-panes.",
+    "For the waveform, integrate wavesurfer.js for visual rendering of uploaded MP3s.",
+    "Components: Use Shadcn UI for forms, selects, and dialogs, but strip rounding (`rounded-none` or `rounded-sm`) and apply the dark/neon theme variables.",
+    "Never use fully transparent backgrounds behind text. Use `bg-[#121212]` or `bg-black/60 backdrop-blur-xl`.",
+    "Do NOT skip adding `data-testid` to buttons, inputs, tabs, and functional wrappers."
+  ]
+}

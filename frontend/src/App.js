@@ -1,54 +1,47 @@
-import { useEffect } from "react";
+import React from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
+import { Toaster } from "sonner";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
-
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
-
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
-
-  return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
-  );
-};
+import { SettingsProvider } from "@/lib/settings";
+import AppHeader from "@/components/AppHeader";
+import StudioPage from "@/pages/StudioPage";
+import LibraryPage from "@/pages/LibraryPage";
+import SongDetailPage from "@/pages/SongDetailPage";
+import StylesPage from "@/pages/StylesPage";
+import SettingsPage from "@/pages/SettingsPage";
 
 function App() {
-  return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </div>
-  );
+    return (
+        <div className="App min-h-screen text-[#EDEDED]">
+            <SettingsProvider>
+                <BrowserRouter>
+                    <AppHeader />
+                    <main className="relative z-10">
+                        <Routes>
+                            <Route path="/" element={<StudioPage />} />
+                            <Route path="/library" element={<LibraryPage />} />
+                            <Route path="/song/:id" element={<SongDetailPage />} />
+                            <Route path="/styles" element={<StylesPage />} />
+                            <Route path="/settings" element={<SettingsPage />} />
+                        </Routes>
+                    </main>
+                    <footer className="border-t border-[#222] mt-16 py-6 px-6">
+                        <div className="max-w-[1600px] mx-auto text-[10px] font-mono tracking-[0.3em] uppercase text-[#444] text-center">
+                            LYRICIST ▸ BEAT-TO-BARS ENGINE
+                        </div>
+                    </footer>
+                </BrowserRouter>
+                <Toaster
+                    position="top-right"
+                    theme="dark"
+                    toastOptions={{
+                        className: "!bg-[#121212] !border !border-[#222] !text-[#EDEDED] !rounded-none !font-mono !text-xs",
+                    }}
+                />
+            </SettingsProvider>
+        </div>
+    );
 }
 
 export default App;

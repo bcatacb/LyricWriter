@@ -1,89 +1,614 @@
-from fastapi import FastAPI, APIRouter
-from dotenv import load_dotenv
+"""AI Lyricist & Digital Songbook — main FastAPI app."""
+import os
+import uuid
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Optional
+
+from fastapi import (
+    FastAPI,
+    APIRouter,
+    UploadFile,
+    File,
+    Form,
+    HTTPException,
+    Query,
+)
+from fastapi.responses import Response
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
+from storage import init_storage, put_object, get_object
+from audio_analyzer import analyze_audio
+from llm_router import call_llm, probe_endpoint, CLOUD_MODELS
+from prompts import (
+    SYSTEM_PROMPT,
+    build_generate_prompt,
+    build_complete_prompt,
+    build_polish_prompt,
+)
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / ".env")
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-# Create the main app without a prefix
-app = FastAPI()
+APP_NAME = os.environ.get("APP_NAME", "lyricist")
+MONGO_URL = os.environ["MONGO_URL"]
+DB_NAME = os.environ["DB_NAME"]
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+client = AsyncIOMotorClient(MONGO_URL)
+db = client[DB_NAME]
+
+app = FastAPI(title="AI Lyricist")
+api = APIRouter(prefix="/api")
+
+# ---------------- Models ----------------
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
+class AudioFeatures(BaseModel):
+    bpm: Optional[float] = None
+    key: Optional[str] = None
+    mode: Optional[str] = None
+    duration_sec: Optional[float] = None
+    energy: Optional[float] = None
+    mood: Optional[str] = None
+
+
+class Song(BaseModel):
+    id: str
+    title: str
+    original_filename: str
+    storage_path: str
+    content_type: str
+    size: int
+    audio: AudioFeatures = Field(default_factory=AudioFeatures)
+    genre: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    notes: Optional[str] = None
+    is_deleted: bool = False
+    created_at: str
+    updated_at: str
+
+
+class SongUpdate(BaseModel):
+    title: Optional[str] = None
+    genre: Optional[str] = None
+    tags: Optional[List[str]] = None
+    notes: Optional[str] = None
+    mood: Optional[str] = None
+
+
+class Draft(BaseModel):
+    id: str
+    song_id: str
+    version: int
+    lyrics: str
+    source: str  # 'generate' | 'complete' | 'polish' | 'manual'
+    params: dict = Field(default_factory=dict)
+    is_approved: bool = False
+    created_at: str
+
+
+class Style(BaseModel):
+    id: str
+    name: str
+    description: str
+    prompt_snippet: str
+    tags: List[str] = Field(default_factory=list)
+    is_preset: bool = False
+    created_at: str
+
+
+class StyleCreate(BaseModel):
+    name: str
+    description: str = ""
+    prompt_snippet: str
+    tags: List[str] = Field(default_factory=list)
+
+
+class GenerateRequest(BaseModel):
+    song_id: Optional[str] = None
+    audio: Optional[AudioFeatures] = None
+    theme: str = ""
+    style: str = ""
+    must_have_words: List[str] = Field(default_factory=list)
+    structure: Optional[List[str]] = None
+    extra_notes: Optional[str] = None
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-4-5-20250929"
+    endpoint: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+class CompleteRequest(BaseModel):
+    song_id: Optional[str] = None
+    audio: Optional[AudioFeatures] = None
+    theme: str = ""
+    style: str = ""
+    partial_lyrics: str
+    must_have_words: List[str] = Field(default_factory=list)
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-4-5-20250929"
+    endpoint: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+class PolishRequest(BaseModel):
+    song_id: Optional[str] = None
+    audio: Optional[AudioFeatures] = None
+    theme: str = ""
+    style: str = ""
+    full_lyrics: str
+    feedback: Optional[str] = None
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-4-5-20250929"
+    endpoint: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+class DraftCreate(BaseModel):
+    lyrics: str
+    source: str = "manual"
+    params: dict = Field(default_factory=dict)
+    is_approved: bool = False
+
+
+class ProbeRequest(BaseModel):
+    endpoint: str
+    api_key: Optional[str] = None
+
+
+# ---------------- Startup ----------------
+
+PRESET_STYLES = [
+    {
+        "name": "Pop Radio",
+        "description": "Catchy, sing-along pop with a strong chorus hook.",
+        "prompt_snippet": "Write in a contemporary pop radio style: bright, emotional, with a memorable chorus hook, direct language, internal rhyme, and a simple repeating motif.",
+        "tags": ["pop", "hook", "radio"],
+        "is_preset": True,
+    },
+    {
+        "name": "Trap/Hip-Hop",
+        "description": "Modern trap cadences, internal rhymes, swagger.",
+        "prompt_snippet": "Write in a modern trap/hip-hop style: multisyllabic internal rhymes, triplet cadences, confident first-person voice, vivid concrete imagery, ad-lib friendly phrasing.",
+        "tags": ["trap", "rap", "hiphop"],
+        "is_preset": True,
+    },
+    {
+        "name": "Indie Folk",
+        "description": "Intimate, narrative, acoustic-leaning storytelling.",
+        "prompt_snippet": "Write in an indie folk style: intimate first-person narrative, specific sensory detail, restrained rhyme, melancholic warmth.",
+        "tags": ["indie", "folk", "acoustic"],
+        "is_preset": True,
+    },
+    {
+        "name": "Synthwave",
+        "description": "Neon-lit, nostalgic 80s-inspired imagery.",
+        "prompt_snippet": "Write in a synthwave / retrowave style: neon cityscapes, chrome, midnight highways, nostalgic longing, 80s film imagery, dreamy detachment.",
+        "tags": ["synthwave", "retro", "80s"],
+        "is_preset": True,
+    },
+    {
+        "name": "Rock Anthem",
+        "description": "Big, fist-in-the-air stadium energy.",
+        "prompt_snippet": "Write in a rock anthem style: declarative first-person, shout-along chorus, defiance and rebellion, powerful monosyllabic hook words.",
+        "tags": ["rock", "anthem", "stadium"],
+        "is_preset": True,
+    },
+    {
+        "name": "R&B Slow Burn",
+        "description": "Sensual, melismatic, vulnerable.",
+        "prompt_snippet": "Write in a contemporary R&B slow-burn style: sensual imagery, vulnerable confession, melismatic-friendly phrasing, smooth enjambment.",
+        "tags": ["rnb", "soul", "slow"],
+        "is_preset": True,
+    },
+]
+
+
+@app.on_event("startup")
+async def startup():
+    try:
+        init_storage()
+    except Exception as e:
+        logger.error("Storage init failed: %s", e)
+
+    # seed preset styles once
+    existing = await db.styles.count_documents({"is_preset": True})
+    if existing == 0:
+        docs = []
+        for s in PRESET_STYLES:
+            docs.append({
+                "id": str(uuid.uuid4()),
+                "created_at": now_iso(),
+                **s,
+            })
+        if docs:
+            await db.styles.insert_many(docs)
+        logger.info("Seeded %d preset styles", len(docs))
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    client.close()
+
+
+# ---------------- Songs ----------------
+
+
+@api.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"app": "AI Lyricist", "status": "ok"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+@api.post("/songs/upload", response_model=Song)
+async def upload_song(file: UploadFile = File(...), title: str = Form("")):
+    if not file.filename:
+        raise HTTPException(400, "filename required")
+    content = await file.read()
+    if len(content) > 30 * 1024 * 1024:
+        raise HTTPException(413, "File too large (>30MB)")
+    if len(content) == 0:
+        raise HTTPException(400, "Empty file")
 
-# Include the router in the main app
-app.include_router(api_router)
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "mp3"
+    song_id = str(uuid.uuid4())
+    path = f"{APP_NAME}/audio/{song_id}.{ext}"
+    content_type = file.content_type or "audio/mpeg"
+
+    try:
+        result = put_object(path, content, content_type)
+    except Exception as e:
+        logger.exception("Storage upload failed")
+        raise HTTPException(502, f"Storage upload failed: {e}") from e
+
+    features = analyze_audio(content)
+    features.pop("error", None)
+
+    doc = {
+        "id": song_id,
+        "title": title or file.filename.rsplit(".", 1)[0],
+        "original_filename": file.filename,
+        "storage_path": result["path"],
+        "content_type": content_type,
+        "size": result.get("size", len(content)),
+        "audio": {
+            "bpm": features.get("bpm"),
+            "key": features.get("key"),
+            "mode": features.get("mode"),
+            "duration_sec": features.get("duration_sec"),
+            "energy": features.get("energy"),
+            "mood": features.get("mood"),
+        },
+        "genre": None,
+        "tags": [],
+        "notes": None,
+        "is_deleted": False,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.songs.insert_one(doc)
+    doc.pop("_id", None)
+    return Song(**doc)
+
+
+@api.get("/songs", response_model=List[Song])
+async def list_songs(
+    q: Optional[str] = None,
+    mood: Optional[str] = None,
+    genre: Optional[str] = None,
+    min_bpm: Optional[float] = None,
+    max_bpm: Optional[float] = None,
+    tag: Optional[str] = None,
+    limit: int = Query(100, le=500),
+):
+    query: dict = {"is_deleted": False}
+    if q:
+        query["$or"] = [
+            {"title": {"$regex": q, "$options": "i"}},
+            {"notes": {"$regex": q, "$options": "i"}},
+            {"original_filename": {"$regex": q, "$options": "i"}},
+        ]
+    if mood:
+        query["audio.mood"] = mood
+    if genre:
+        query["genre"] = genre
+    if tag:
+        query["tags"] = tag
+    if min_bpm is not None or max_bpm is not None:
+        bpm_q: dict = {}
+        if min_bpm is not None:
+            bpm_q["$gte"] = min_bpm
+        if max_bpm is not None:
+            bpm_q["$lte"] = max_bpm
+        query["audio.bpm"] = bpm_q
+    cursor = db.songs.find(query, {"_id": 0}).sort("created_at", -1).limit(limit)
+    out = []
+    async for doc in cursor:
+        out.append(Song(**doc))
+    return out
+
+
+@api.get("/songs/{song_id}", response_model=Song)
+async def get_song(song_id: str):
+    doc = await db.songs.find_one({"id": song_id, "is_deleted": False}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Song not found")
+    return Song(**doc)
+
+
+@api.patch("/songs/{song_id}", response_model=Song)
+async def update_song(song_id: str, update: SongUpdate):
+    doc = await db.songs.find_one({"id": song_id, "is_deleted": False}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Song not found")
+    patch: dict = {}
+    for field in ("title", "genre", "tags", "notes"):
+        v = getattr(update, field)
+        if v is not None:
+            patch[field] = v
+    if update.mood is not None:
+        patch["audio.mood"] = update.mood
+    if patch:
+        patch["updated_at"] = now_iso()
+        await db.songs.update_one({"id": song_id}, {"$set": patch})
+    doc = await db.songs.find_one({"id": song_id}, {"_id": 0})
+    return Song(**doc)
+
+
+@api.delete("/songs/{song_id}")
+async def delete_song(song_id: str):
+    res = await db.songs.update_one(
+        {"id": song_id}, {"$set": {"is_deleted": True, "updated_at": now_iso()}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Song not found")
+    return {"ok": True}
+
+
+@api.get("/songs/{song_id}/audio")
+async def stream_audio(song_id: str):
+    doc = await db.songs.find_one({"id": song_id, "is_deleted": False}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Song not found")
+    try:
+        data, ct = get_object(doc["storage_path"])
+    except Exception as e:
+        raise HTTPException(502, f"Storage fetch failed: {e}") from e
+    return Response(content=data, media_type=doc.get("content_type") or ct)
+
+
+# ---------------- Drafts ----------------
+
+
+@api.post("/songs/{song_id}/drafts", response_model=Draft)
+async def create_draft(song_id: str, payload: DraftCreate):
+    song = await db.songs.find_one({"id": song_id, "is_deleted": False}, {"_id": 0})
+    if not song:
+        raise HTTPException(404, "Song not found")
+    existing = await db.drafts.count_documents({"song_id": song_id})
+    draft = {
+        "id": str(uuid.uuid4()),
+        "song_id": song_id,
+        "version": existing + 1,
+        "lyrics": payload.lyrics,
+        "source": payload.source,
+        "params": payload.params,
+        "is_approved": payload.is_approved,
+        "created_at": now_iso(),
+    }
+    await db.drafts.insert_one(draft)
+    draft.pop("_id", None)
+    return Draft(**draft)
+
+
+@api.get("/songs/{song_id}/drafts", response_model=List[Draft])
+async def list_drafts(song_id: str):
+    cursor = (
+        db.drafts.find({"song_id": song_id}, {"_id": 0})
+        .sort("version", -1)
+        .limit(200)
+    )
+    out = []
+    async for d in cursor:
+        out.append(Draft(**d))
+    return out
+
+
+@api.post("/songs/{song_id}/drafts/{draft_id}/approve", response_model=Draft)
+async def approve_draft(song_id: str, draft_id: str):
+    # unapprove all other drafts for the song, approve this one
+    await db.drafts.update_many(
+        {"song_id": song_id}, {"$set": {"is_approved": False}}
+    )
+    res = await db.drafts.update_one(
+        {"id": draft_id, "song_id": song_id}, {"$set": {"is_approved": True}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Draft not found")
+    d = await db.drafts.find_one({"id": draft_id}, {"_id": 0})
+    return Draft(**d)
+
+
+@api.delete("/songs/{song_id}/drafts/{draft_id}")
+async def delete_draft(song_id: str, draft_id: str):
+    res = await db.drafts.delete_one({"id": draft_id, "song_id": song_id})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Draft not found")
+    return {"ok": True}
+
+
+# ---------------- Styles ----------------
+
+
+@api.get("/styles", response_model=List[Style])
+async def list_styles():
+    cursor = db.styles.find({}, {"_id": 0}).sort([("is_preset", -1), ("name", 1)])
+    out = []
+    async for s in cursor:
+        out.append(Style(**s))
+    return out
+
+
+@api.post("/styles", response_model=Style)
+async def create_style(payload: StyleCreate):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "created_at": now_iso(),
+        "is_preset": False,
+        **payload.model_dump(),
+    }
+    await db.styles.insert_one(doc)
+    doc.pop("_id", None)
+    return Style(**doc)
+
+
+@api.delete("/styles/{style_id}")
+async def delete_style(style_id: str):
+    res = await db.styles.delete_one({"id": style_id, "is_preset": False})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Style not found or is a preset")
+    return {"ok": True}
+
+
+# ---------------- Providers ----------------
+
+
+@api.get("/providers")
+async def list_providers():
+    return {
+        "cloud": CLOUD_MODELS,
+        "local": {
+            "ollama": {
+                "default_endpoint": "http://localhost:11434",
+                "note": "Ollama's OpenAI-compatible API. /v1 is appended automatically.",
+            },
+            "lmstudio": {
+                "default_endpoint": "http://localhost:1234/v1",
+                "note": "LM Studio OpenAI-compatible server.",
+            },
+        },
+    }
+
+
+@api.post("/providers/test")
+async def providers_test(req: ProbeRequest):
+    result = await probe_endpoint(req.endpoint, req.api_key)
+    return result
+
+
+# ---------------- Lyrics ----------------
+
+
+async def _resolve_audio(song_id: Optional[str], inline: Optional[AudioFeatures]):
+    if inline:
+        return inline.model_dump()
+    if song_id:
+        s = await db.songs.find_one({"id": song_id}, {"_id": 0})
+        if s:
+            return s.get("audio") or {}
+    return {}
+
+
+@api.post("/lyrics/generate")
+async def lyrics_generate(req: GenerateRequest):
+    audio = await _resolve_audio(req.song_id, req.audio)
+    user_prompt = build_generate_prompt(
+        audio, req.theme, req.style, req.must_have_words, req.structure, req.extra_notes
+    )
+    try:
+        text = await call_llm(
+            req.provider,
+            req.model,
+            SYSTEM_PROMPT,
+            user_prompt,
+            session_id=f"generate-{req.song_id or 'adhoc'}",
+            endpoint=req.endpoint,
+            api_key=req.api_key,
+        )
+    except Exception as e:
+        logger.exception("Generate failed")
+        raise HTTPException(502, f"LLM error: {e}") from e
+    return {"lyrics": text, "provider": req.provider, "model": req.model}
+
+
+@api.post("/lyrics/complete")
+async def lyrics_complete(req: CompleteRequest):
+    audio = await _resolve_audio(req.song_id, req.audio)
+    user_prompt = build_complete_prompt(
+        audio, req.theme, req.style, req.partial_lyrics, req.must_have_words
+    )
+    try:
+        text = await call_llm(
+            req.provider,
+            req.model,
+            SYSTEM_PROMPT,
+            user_prompt,
+            session_id=f"complete-{req.song_id or 'adhoc'}",
+            endpoint=req.endpoint,
+            api_key=req.api_key,
+        )
+    except Exception as e:
+        logger.exception("Complete failed")
+        raise HTTPException(502, f"LLM error: {e}") from e
+    return {"lyrics": text, "provider": req.provider, "model": req.model}
+
+
+@api.post("/lyrics/polish")
+async def lyrics_polish(req: PolishRequest):
+    audio = await _resolve_audio(req.song_id, req.audio)
+    user_prompt = build_polish_prompt(
+        audio, req.theme, req.style, req.full_lyrics, req.feedback
+    )
+    try:
+        text = await call_llm(
+            req.provider,
+            req.model,
+            SYSTEM_PROMPT,
+            user_prompt,
+            session_id=f"polish-{req.song_id or 'adhoc'}",
+            endpoint=req.endpoint,
+            api_key=req.api_key,
+        )
+    except Exception as e:
+        logger.exception("Polish failed")
+        raise HTTPException(502, f"LLM error: {e}") from e
+    return {"lyrics": text, "provider": req.provider, "model": req.model}
+
+
+# ---------------- Stats ----------------
+
+
+@api.get("/stats")
+async def stats():
+    songs_count = await db.songs.count_documents({"is_deleted": False})
+    drafts_count = await db.drafts.count_documents({})
+    approved_count = await db.drafts.count_documents({"is_approved": True})
+    return {
+        "songs": songs_count,
+        "drafts": drafts_count,
+        "approved": approved_count,
+    }
+
+
+app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()

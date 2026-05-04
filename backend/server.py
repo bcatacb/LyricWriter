@@ -15,7 +15,7 @@ from fastapi import (
     HTTPException,
     Query,
 )
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
@@ -30,6 +30,7 @@ from prompts import (
     build_complete_prompt,
     build_polish_prompt,
 )
+from stream_router import stream_llm
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -601,6 +602,181 @@ async def stats():
         "drafts": drafts_count,
         "approved": approved_count,
     }
+
+
+# ---------------- Streaming (SSE) ----------------
+
+
+def _sse_stream(provider, model, system_prompt, user_prompt, session_id, endpoint, api_key):
+    async def gen():
+        async for chunk in stream_llm(
+            provider=provider,
+            model=model,
+            system=system_prompt,
+            user=user_prompt,
+            session_id=session_id,
+            endpoint=endpoint,
+            api_key=api_key,
+        ):
+            yield chunk
+
+    headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "Content-Type": "text/event-stream",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+
+
+@api.post("/lyrics/generate/stream")
+async def lyrics_generate_stream(req: GenerateRequest):
+    audio = await _resolve_audio(req.song_id, req.audio)
+    user_prompt = build_generate_prompt(
+        audio, req.theme, req.style, req.must_have_words, req.structure, req.extra_notes
+    )
+    return _sse_stream(
+        req.provider, req.model, SYSTEM_PROMPT, user_prompt,
+        f"generate-{req.song_id or 'adhoc'}", req.endpoint, req.api_key,
+    )
+
+
+@api.post("/lyrics/complete/stream")
+async def lyrics_complete_stream(req: CompleteRequest):
+    audio = await _resolve_audio(req.song_id, req.audio)
+    user_prompt = build_complete_prompt(
+        audio, req.theme, req.style, req.partial_lyrics, req.must_have_words
+    )
+    return _sse_stream(
+        req.provider, req.model, SYSTEM_PROMPT, user_prompt,
+        f"complete-{req.song_id or 'adhoc'}", req.endpoint, req.api_key,
+    )
+
+
+@api.post("/lyrics/polish/stream")
+async def lyrics_polish_stream(req: PolishRequest):
+    audio = await _resolve_audio(req.song_id, req.audio)
+    user_prompt = build_polish_prompt(
+        audio, req.theme, req.style, req.full_lyrics, req.feedback
+    )
+    return _sse_stream(
+        req.provider, req.model, SYSTEM_PROMPT, user_prompt,
+        f"polish-{req.song_id or 'adhoc'}", req.endpoint, req.api_key,
+    )
+
+
+# ---------------- Public share links ----------------
+
+
+def _make_slug(title: str) -> str:
+    import re
+    base = re.sub(r"[^a-z0-9]+", "-", (title or "song").lower()).strip("-")[:48]
+    if not base:
+        base = "song"
+    return f"{base}-{uuid.uuid4().hex[:6]}"
+
+
+class ShareCreateRequest(BaseModel):
+    # (no fields needed; identified by path)
+    pass
+
+
+@api.post("/songs/{song_id}/drafts/{draft_id}/share")
+async def create_share(song_id: str, draft_id: str):
+    song = await db.songs.find_one({"id": song_id, "is_deleted": False}, {"_id": 0})
+    if not song:
+        raise HTTPException(404, "Song not found")
+    draft = await db.drafts.find_one({"id": draft_id, "song_id": song_id}, {"_id": 0})
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+
+    # If a share already exists for this draft, return it (idempotent).
+    existing = await db.shares.find_one(
+        {"song_id": song_id, "draft_id": draft_id, "is_revoked": False}, {"_id": 0}
+    )
+    if existing:
+        return existing
+
+    slug = _make_slug(song.get("title", ""))
+    doc = {
+        "slug": slug,
+        "song_id": song_id,
+        "draft_id": draft_id,
+        "is_revoked": False,
+        "view_count": 0,
+        "created_at": now_iso(),
+    }
+    await db.shares.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.delete("/shares/{slug}")
+async def revoke_share(slug: str):
+    res = await db.shares.update_one(
+        {"slug": slug}, {"$set": {"is_revoked": True}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Share not found")
+    return {"ok": True}
+
+
+@api.get("/songs/{song_id}/shares")
+async def list_shares_for_song(song_id: str):
+    cursor = db.shares.find(
+        {"song_id": song_id, "is_revoked": False}, {"_id": 0}
+    ).sort("created_at", -1)
+    return [s async for s in cursor]
+
+
+@api.get("/share/{slug}")
+async def get_share(slug: str):
+    share = await db.shares.find_one({"slug": slug, "is_revoked": False}, {"_id": 0})
+    if not share:
+        raise HTTPException(404, "Share not found or revoked")
+    song = await db.songs.find_one(
+        {"id": share["song_id"], "is_deleted": False}, {"_id": 0}
+    )
+    if not song:
+        raise HTTPException(404, "Song not available")
+    draft = await db.drafts.find_one({"id": share["draft_id"]}, {"_id": 0})
+    if not draft:
+        raise HTTPException(404, "Lyrics not available")
+    await db.shares.update_one({"slug": slug}, {"$inc": {"view_count": 1}})
+    return {
+        "slug": slug,
+        "created_at": share["created_at"],
+        "view_count": share.get("view_count", 0) + 1,
+        "song": {
+            "id": song["id"],
+            "title": song["title"],
+            "original_filename": song["original_filename"],
+            "audio": song.get("audio") or {},
+            "genre": song.get("genre"),
+            "tags": song.get("tags") or [],
+        },
+        "lyrics": draft["lyrics"],
+        "draft_version": draft.get("version"),
+        "theme": (draft.get("params") or {}).get("theme"),
+        "style": (draft.get("params") or {}).get("style"),
+    }
+
+
+@api.get("/share/{slug}/audio")
+async def share_audio(slug: str):
+    share = await db.shares.find_one({"slug": slug, "is_revoked": False}, {"_id": 0})
+    if not share:
+        raise HTTPException(404, "Share not found")
+    song = await db.songs.find_one(
+        {"id": share["song_id"], "is_deleted": False}, {"_id": 0}
+    )
+    if not song:
+        raise HTTPException(404, "Audio not available")
+    try:
+        data, ct = get_object(song["storage_path"])
+    except Exception as e:
+        raise HTTPException(502, f"Storage fetch failed: {e}") from e
+    return Response(content=data, media_type=song.get("content_type") or ct)
 
 
 app.include_router(api)

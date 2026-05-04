@@ -1,11 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeftIcon, CheckCircleIcon, TrashIcon, PencilSimpleIcon } from "@phosphor-icons/react";
+import {
+    ArrowLeftIcon,
+    CheckCircleIcon,
+    TrashIcon,
+    PencilSimpleIcon,
+    ShareNetworkIcon,
+} from "@phosphor-icons/react";
 import { api, BACKEND_URL } from "../lib/api";
 import Waveform from "../components/Waveform";
 import AnalysisTags from "../components/AnalysisTags";
 import LyricsDisplay from "../components/LyricsDisplay";
+import ConfirmDialog from "../components/ConfirmDialog";
+import ShareDialog from "../components/ShareDialog";
 
 export default function SongDetailPage() {
     const { id } = useParams();
@@ -14,6 +22,9 @@ export default function SongDetailPage() {
     const [selectedDraftId, setSelectedDraftId] = useState(null);
     const [editingMeta, setEditingMeta] = useState(false);
     const [meta, setMeta] = useState({ title: "", genre: "", tags: "", notes: "" });
+
+    const [confirmDraftId, setConfirmDraftId] = useState(null);
+    const [shareOpen, setShareOpen] = useState(false);
 
     const fetchAll = async () => {
         try {
@@ -31,7 +42,7 @@ export default function SongDetailPage() {
             });
             if (d.data.length > 0) {
                 const approved = d.data.find((x) => x.is_approved);
-                setSelectedDraftId(approved?.id || d.data[0].id);
+                setSelectedDraftId((prev) => prev && d.data.find((x) => x.id === prev) ? prev : (approved?.id || d.data[0].id));
             }
         } catch (e) {
             toast.error("Failed to load song");
@@ -70,10 +81,11 @@ export default function SongDetailPage() {
     };
 
     const deleteDraft = async (draftId) => {
-        if (!window.confirm("Delete this draft?")) return;
         try {
             await api.delete(`/songs/${id}/drafts/${draftId}`);
-            toast.success("Deleted");
+            toast.success("Draft deleted");
+            setConfirmDraftId(null);
+            if (selectedDraftId === draftId) setSelectedDraftId(null);
             fetchAll();
         } catch {
             toast.error("Failed");
@@ -145,7 +157,7 @@ export default function SongDetailPage() {
                     </div>
 
                     <div className="border border-[#222] bg-[#121212] p-5">
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                             <div className="font-display text-lg font-bold text-[#39FF14] uppercase tracking-tight">
                                 {selectedDraft?.is_approved ? "Final Lyrics" : "Draft"}
                                 {selectedDraft && (
@@ -154,14 +166,25 @@ export default function SongDetailPage() {
                                     </span>
                                 )}
                             </div>
-                            {selectedDraft && !selectedDraft.is_approved && (
-                                <button
-                                    onClick={() => approveDraft(selectedDraft.id)}
-                                    className="bg-[#39FF14] text-black text-xs font-mono uppercase tracking-[0.2em] px-3 py-2 hover:bg-[#00FF41] flex items-center gap-2"
-                                    data-testid="approve-draft-btn"
-                                >
-                                    <CheckCircleIcon size={12} weight="fill" /> Approve as Final
-                                </button>
+                            {selectedDraft && (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    {!selectedDraft.is_approved && (
+                                        <button
+                                            onClick={() => approveDraft(selectedDraft.id)}
+                                            className="bg-[#39FF14] text-black text-xs font-mono uppercase tracking-[0.2em] px-3 py-2 hover:bg-[#00FF41] flex items-center gap-2"
+                                            data-testid="approve-draft-btn"
+                                        >
+                                            <CheckCircleIcon size={12} weight="fill" /> Approve
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => setShareOpen(true)}
+                                        className="border border-[#39FF14] text-[#39FF14] bg-transparent hover:bg-[#39FF14]/10 text-xs font-mono uppercase tracking-[0.2em] px-3 py-2 flex items-center gap-2"
+                                        data-testid="share-draft-btn"
+                                    >
+                                        <ShareNetworkIcon size={12} weight="bold" /> Share
+                                    </button>
+                                </div>
                             )}
                         </div>
                         {selectedDraft ? (
@@ -203,7 +226,7 @@ export default function SongDetailPage() {
                                             </div>
                                         </div>
                                         <span
-                                            onClick={(e) => { e.stopPropagation(); deleteDraft(d.id); }}
+                                            onClick={(e) => { e.stopPropagation(); setConfirmDraftId(d.id); }}
                                             className="text-[#666] hover:text-red-400 p-1 cursor-pointer"
                                             data-testid={`draft-delete-${d.id}`}
                                         >
@@ -219,6 +242,24 @@ export default function SongDetailPage() {
                     )}
                 </div>
             </div>
+
+            <ConfirmDialog
+                open={!!confirmDraftId}
+                onOpenChange={(v) => !v && setConfirmDraftId(null)}
+                title="Delete this draft?"
+                description="This permanently removes this version from history."
+                confirmLabel="Delete"
+                destructive
+                onConfirm={() => confirmDraftId && deleteDraft(confirmDraftId)}
+                testIdPrefix="confirm-draft-delete"
+            />
+
+            <ShareDialog
+                open={shareOpen}
+                onOpenChange={setShareOpen}
+                songId={song.id}
+                draftId={selectedDraft?.id}
+            />
         </div>
     );
 }

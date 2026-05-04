@@ -2,11 +2,13 @@ import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { TrashIcon, PlusIcon, StarIcon } from "@phosphor-icons/react";
 import { api } from "../lib/api";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 export default function StylesPage() {
     const [styles, setStyles] = useState([]);
     const [form, setForm] = useState({ name: "", description: "", prompt_snippet: "", tags: "" });
     const [busy, setBusy] = useState(false);
+    const [confirmId, setConfirmId] = useState(null);
 
     const load = () => api.get("/styles").then((r) => setStyles(r.data));
 
@@ -34,10 +36,10 @@ export default function StylesPage() {
     };
 
     const remove = async (id) => {
-        if (!window.confirm("Delete this style?")) return;
         try {
             await api.delete(`/styles/${id}`);
             toast.success("Deleted");
+            setConfirmId(null);
             load();
         } catch {
             toast.error("Failed");
@@ -82,7 +84,7 @@ export default function StylesPage() {
                                 </div>
                                 {!s.is_preset && (
                                     <button
-                                        onClick={() => remove(s.id)}
+                                        onClick={() => setConfirmId(s.id)}
                                         className="text-[#666] hover:text-red-400"
                                         data-testid={`style-delete-${s.id}`}
                                         aria-label="Delete style"
@@ -138,6 +140,17 @@ export default function StylesPage() {
                     </button>
                 </form>
             </div>
+
+            <ConfirmDialog
+                open={!!confirmId}
+                onOpenChange={(v) => !v && setConfirmId(null)}
+                title="Delete this style?"
+                description="You won't be able to recover it."
+                confirmLabel="Delete"
+                destructive
+                onConfirm={() => confirmId && remove(confirmId)}
+                testIdPrefix="confirm-style-delete"
+            />
         </div>
     );
 }

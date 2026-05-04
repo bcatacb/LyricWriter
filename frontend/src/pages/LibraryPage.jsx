@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { MagnifyingGlassIcon, VinylRecordIcon, TrashIcon } from "@phosphor-icons/react";
 import { api } from "../lib/api";
 import { toast } from "sonner";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const MOODS = ["energetic", "aggressive", "chill", "melancholic", "introspective", "mellow", "uplifting", "moody"];
 
@@ -13,6 +14,7 @@ export default function LibraryPage() {
     const [minBpm, setMinBpm] = useState("");
     const [maxBpm, setMaxBpm] = useState("");
     const [loading, setLoading] = useState(true);
+    const [confirmId, setConfirmId] = useState(null);
 
     const fetchList = async () => {
         setLoading(true);
@@ -38,13 +40,18 @@ export default function LibraryPage() {
         // eslint-disable-next-line
     }, [q, mood, minBpm, maxBpm]);
 
-    const handleDelete = async (id, e) => {
+    const handleDelete = async (e, id) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!window.confirm("Archive this track?")) return;
+        setConfirmId(id);
+    };
+
+    const doDelete = async () => {
+        if (!confirmId) return;
         try {
-            await api.delete(`/songs/${id}`);
+            await api.delete(`/songs/${confirmId}`);
             toast.success("Archived");
+            setConfirmId(null);
             fetchList();
         } catch {
             toast.error("Delete failed");
@@ -122,6 +129,17 @@ export default function LibraryPage() {
                     ))}
                 </div>
             )}
+
+            <ConfirmDialog
+                open={!!confirmId}
+                onOpenChange={(v) => !v && setConfirmId(null)}
+                title="Archive this track?"
+                description="The song will be hidden from your songbook. You won't see it in search results anymore."
+                confirmLabel="Archive"
+                destructive
+                onConfirm={doDelete}
+                testIdPrefix="confirm-song-delete"
+            />
         </div>
     );
 }
@@ -136,7 +154,7 @@ function SongCard({ song, onDelete }) {
             data-testid={`song-card-${song.id}`}
         >
             <button
-                onClick={(e) => onDelete(song.id, e)}
+                onClick={(e) => onDelete(e, song.id)}
                 className="absolute top-3 right-3 text-[#666] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                 data-testid={`song-delete-${song.id}`}
                 aria-label="Archive track"

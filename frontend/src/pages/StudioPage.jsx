@@ -11,8 +11,9 @@ import {
     ArrowsClockwiseIcon,
 } from "@phosphor-icons/react";
 
-import { api, BACKEND_URL } from "../lib/api";
+import { api, BACKEND_URL, API } from "../lib/api";
 import { useSettings } from "../lib/settings";
+import { streamSSE } from "../lib/sse";
 import Dropzone from "../components/Dropzone";
 import Waveform from "../components/Waveform";
 import AnalysisTags from "../components/AnalysisTags";
@@ -88,16 +89,24 @@ export default function StudioPage() {
     const runGenerate = async () => {
         if (!song) return toast.error("Upload an instrumental first");
         setBusyAction("generate");
+        setLyrics("");
         try {
             const body = buildBody({
                 structure: autoStructure ? null : structure,
                 extra_notes: notes,
             });
-            const r = await api.post("/lyrics/generate", body);
-            setLyrics(r.data.lyrics);
-            toast.success("Lyrics generated");
+            await streamSSE(`${API}/lyrics/generate/stream`, body, {
+                onEvent: ({ event, data }) => {
+                    if (event === "delta") setLyrics((t) => t + (data?.text || ""));
+                    if (event === "error") toast.error("Generation failed", { description: data?.message });
+                    if (event === "done") {
+                        if (data?.lyrics) setLyrics(data.lyrics);
+                        toast.success("Lyrics generated");
+                    }
+                },
+            });
         } catch (e) {
-            toast.error("Generation failed", { description: e?.response?.data?.detail || e.message });
+            toast.error("Generation failed", { description: e.message });
         } finally {
             setBusyAction(null);
         }
@@ -107,13 +116,25 @@ export default function StudioPage() {
         if (!song) return toast.error("Upload an instrumental first");
         if (!lyrics.trim()) return toast.error("Write some partial lyrics first");
         setBusyAction("complete");
+        const seed = lyrics;
         try {
-            const body = buildBody({ partial_lyrics: lyrics });
-            const r = await api.post("/lyrics/complete", body);
-            setLyrics(r.data.lyrics);
-            toast.success("Lyrics completed");
+            const body = buildBody({ partial_lyrics: seed });
+            let acc = "";
+            await streamSSE(`${API}/lyrics/complete/stream`, body, {
+                onEvent: ({ event, data }) => {
+                    if (event === "delta") {
+                        acc += data?.text || "";
+                        setLyrics(acc);
+                    }
+                    if (event === "error") toast.error("Completion failed", { description: data?.message });
+                    if (event === "done") {
+                        if (data?.lyrics) setLyrics(data.lyrics);
+                        toast.success("Lyrics completed");
+                    }
+                },
+            });
         } catch (e) {
-            toast.error("Completion failed", { description: e?.response?.data?.detail || e.message });
+            toast.error("Completion failed", { description: e.message });
         } finally {
             setBusyAction(null);
         }
@@ -123,13 +144,25 @@ export default function StudioPage() {
         if (!song) return toast.error("Upload an instrumental first");
         if (!lyrics.trim()) return toast.error("Paste full lyrics to polish");
         setBusyAction("polish");
+        const original = lyrics;
         try {
-            const body = buildBody({ full_lyrics: lyrics, feedback });
-            const r = await api.post("/lyrics/polish", body);
-            setLyrics(r.data.lyrics);
-            toast.success("Lyrics polished");
+            const body = buildBody({ full_lyrics: original, feedback });
+            let acc = "";
+            await streamSSE(`${API}/lyrics/polish/stream`, body, {
+                onEvent: ({ event, data }) => {
+                    if (event === "delta") {
+                        acc += data?.text || "";
+                        setLyrics(acc);
+                    }
+                    if (event === "error") toast.error("Polish failed", { description: data?.message });
+                    if (event === "done") {
+                        if (data?.lyrics) setLyrics(data.lyrics);
+                        toast.success("Lyrics polished");
+                    }
+                },
+            });
         } catch (e) {
-            toast.error("Polish failed", { description: e?.response?.data?.detail || e.message });
+            toast.error("Polish failed", { description: e.message });
         } finally {
             setBusyAction(null);
         }

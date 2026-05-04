@@ -11,28 +11,45 @@ export default function Waveform({ url, height = 96, small = false }) {
 
     useEffect(() => {
         if (!containerRef.current || !url) return;
-        const ws = WaveSurfer.create({
-            container: containerRef.current,
-            waveColor: "#2a2a2a",
-            progressColor: "#39FF14",
-            cursorColor: "#EDEDED",
-            cursorWidth: 2,
-            barWidth: 2,
-            barGap: 1,
-            barRadius: 0,
-            height,
-            normalize: true,
-        });
-        wsRef.current = ws;
-        ws.load(url);
-        ws.on("ready", () => setDur(ws.getDuration()));
-        ws.on("audioprocess", (t) => setPos(t));
-        ws.on("seeking", (t) => setPos(t));
-        ws.on("play", () => setPlaying(true));
-        ws.on("pause", () => setPlaying(false));
-        ws.on("finish", () => setPlaying(false));
+        let active = true;
+        let ws = null;
+        // defer to next tick so StrictMode's mount-unmount-mount doesn't churn wavesurfer
+        const timer = setTimeout(() => {
+            if (!active || !containerRef.current) return;
+            ws = WaveSurfer.create({
+                container: containerRef.current,
+                waveColor: "#2a2a2a",
+                progressColor: "#39FF14",
+                cursorColor: "#EDEDED",
+                cursorWidth: 2,
+                barWidth: 2,
+                barGap: 1,
+                barRadius: 0,
+                height,
+                normalize: true,
+            });
+            wsRef.current = ws;
+            ws.load(url).catch(() => {});
+            const onReady = () => active && setDur(ws.getDuration());
+            const onTime = (t) => active && setPos(t);
+            const onPlay = () => active && setPlaying(true);
+            const onPause = () => active && setPlaying(false);
+            const onFinish = () => active && setPlaying(false);
+            ws.on("ready", onReady);
+            ws.on("audioprocess", onTime);
+            ws.on("seeking", onTime);
+            ws.on("play", onPlay);
+            ws.on("pause", onPause);
+            ws.on("finish", onFinish);
+        }, 0);
         return () => {
-            try { ws.destroy(); } catch {}
+            active = false;
+            clearTimeout(timer);
+            if (ws) {
+                try { ws.unAll(); } catch {}
+                try { ws.destroy(); } catch {}
+            }
+            wsRef.current = null;
         };
     }, [url, height]);
 

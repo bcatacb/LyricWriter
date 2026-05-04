@@ -23,19 +23,26 @@ Build an AI app where the user uploads an MP3 instrumental, the AI analyzes it (
 - Providers: `GET /providers`, `POST /providers/test`
 - Stats: `GET /stats`
 
-## Implemented Features (2026-05-04)
+## Implemented Features
+### 2026-05-04 (Initial MVP)
 - Drag-and-drop MP3/WAV/OGG/FLAC/M4A upload with client-side validation + waveform preview.
 - librosa-based audio analysis — BPM (beat_track), key (Krumhansl-Schmuckler chroma), duration, RMS energy, heuristic mood tag.
 - Emergent object storage for MP3s with soft-delete and backend-streamed playback.
 - Multi-provider LLM routing: Claude Sonnet/Haiku/Opus 4.5, GPT-5.x / 4.1, Gemini 3 via Emergent Universal Key; Ollama + LM Studio via OpenAI-compatible `/v1/chat/completions`.
 - Three lyric operations with section-tag enforced prompt templates.
 - Draft/version history per song with "Approve Final" archival.
-- Styles library — 6 seeded presets (Pop Radio, Trap/Hip-Hop, Indie Folk, Synthwave, Rock Anthem, R&B Slow Burn) + user-created custom styles.
+- Styles library — 6 seeded presets + user-created custom styles.
 - Songbook search/filter by keyword, mood, BPM range, tag.
 - Provider settings with endpoint test (pings `/v1/models`).
 - Neon-green DAW visual system (Unbounded + JetBrains Mono, grid background, waveform with neon playhead, section-tag highlighter).
 - `data-testid` on all interactive elements.
-- 100% pytest (19 cases) + Playwright frontend coverage.
+
+### 2026-05-04 (Iteration 2)
+- **Public Share Links** — POST /api/songs/{id}/drafts/{did}/share returns a unique slug; /share/:slug is a public page (no nav chrome) with waveform, analysis tags, neon-highlighted lyrics, and a viral "Turn your beat into bars" CTA. View counter + revoke support.
+- **SSE streaming** for all three lyric ops — POST /api/lyrics/{generate|complete|polish}/stream emits text/event-stream events (status/delta/done). True token-level streaming for local Ollama/LM Studio; word-level trickle for cloud providers (uniform live-typing UX).
+- **shadcn AlertDialog** replacing every `window.confirm` — destructive red confirm for song/style/draft deletes; deterministic for Playwright.
+
+Test coverage: 100% backend (30/30 pytest) + 100% frontend.
 
 ## Prioritized Backlog
 ### P0 (none — MVP complete)

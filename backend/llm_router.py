@@ -93,8 +93,13 @@ async def _call_openai_compatible(
 ) -> str:
     """Call OpenAI-compatible endpoint (Ollama /v1, LM Studio /v1, etc)."""
     base_url = base_url.rstrip("/")
+    # Smart path detection: LM Studio often uses /api/v1, standard is /v1
     if "/v1" not in base_url:
-        base_url = f"{base_url}/v1"
+        # Check if it looks like LM Studio (often has no path)
+        if "tail" in base_url or "localhost" in base_url:
+            base_url = f"{base_url}/api/v1"
+        else:
+            base_url = f"{base_url}/v1"
     
     url = f"{base_url}/chat/completions"
     headers = {"Content-Type": "application/json"}
@@ -146,7 +151,10 @@ async def probe_endpoint(endpoint: str, api_key: str | None = None) -> dict:
     """Test an Ollama/LM Studio endpoint by listing models."""
     base = endpoint.rstrip("/")
     if "/v1" not in base:
-        base = f"{base}/v1"
+        if "tail" in base or "localhost" in base:
+            base = f"{base}/api/v1"
+        else:
+            base = f"{base}/v1"
     url = f"{base}/models"
     headers = {}
     if api_key:

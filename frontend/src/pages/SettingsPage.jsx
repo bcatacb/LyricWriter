@@ -50,8 +50,8 @@ export default function SettingsPage() {
                         <div className="font-display text-lg font-bold text-[#EDEDED]">Cloud Providers</div>
                     </div>
                     <div className="text-sm text-[#A0A0A0] leading-relaxed">
-                        Claude (Anthropic), GPT (OpenAI), Gemini (Google) are routed through your Emergent Universal Key.
-                        Usage deducts from your Emergent balance. Switch model in the Studio Control Room.
+                        Claude (Anthropic), GPT (OpenAI), and Gemini (Google) are currently routed via direct API integration. 
+                        Ensure your API keys are configured in the backend environment.
                     </div>
                 </div>
                 <div className="border border-[#222] bg-[#121212] p-5" data-testid="local-info">

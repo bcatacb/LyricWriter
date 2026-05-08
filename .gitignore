@@ -31,9 +31,15 @@ dist/
 dist
 
 # Environment files (comprehensive coverage)
-
+.env
+.env.*
 *token.json*
 *credentials.json*
+
+# Local data and temporary files
+backend/local_storage/
+tmp/
+
 
 # Logs and debug files
 npm-debug.log*

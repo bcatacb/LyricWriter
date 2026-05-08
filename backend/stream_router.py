@@ -13,7 +13,7 @@ import os
 from typing import AsyncIterator, Optional
 
 import httpx
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+# Removed emergentintegrations import; cloud providers not supported
 
 logger = logging.getLogger(__name__)
 
@@ -31,26 +31,18 @@ def _sse(event: str, data) -> bytes:
 async def _cloud_word_trickle(
     provider: str, model: str, system: str, user: str, session_id: str
 ) -> AsyncIterator[bytes]:
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
-    if not api_key:
-        yield _sse("error", {"message": "EMERGENT_LLM_KEY missing"})
-        return
-
-    yield _sse("status", {"message": "calling cloud model…"})
+    from .llm_router import call_llm
+    
+    yield _sse("status", {"message": f"calling {provider} cloud…"})
     try:
-        chat = LlmChat(
-            api_key=api_key, session_id=session_id, system_message=system
-        ).with_model(provider, model)
-        full = await chat.send_message(UserMessage(text=user))
+        full = await call_llm(provider, model, system, user, session_id)
     except Exception as e:
         logger.exception("Cloud LLM failed")
         yield _sse("error", {"message": str(e)})
         return
 
     full = str(full or "")
-    # Word-level trickle so the UI feels alive. 25ms per chunk.
-    buf = ""
-    # tokenize by whitespace while preserving newlines/spaces
+    # Word-level trickle so the UI feels alive.
     tokens = []
     current = ""
     for ch in full:
@@ -62,9 +54,7 @@ async def _cloud_word_trickle(
         tokens.append(current)
 
     for tok in tokens:
-        buf += tok
         yield _sse("delta", {"text": tok})
-        # short throttle; skip on newlines for snappier section breaks
         if "\n" not in tok:
             await asyncio.sleep(0.018)
 
@@ -143,7 +133,6 @@ async def stream_llm(
     endpoint: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> AsyncIterator[bytes]:
-    provider = provider.lower().strip()
     if provider in CLOUD_PROVIDERS:
         async for chunk in _cloud_word_trickle(provider, model, system, user, session_id):
             yield chunk

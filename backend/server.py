@@ -21,16 +21,16 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-from storage import init_storage, put_object, get_object
-from audio_analyzer import analyze_audio
-from llm_router import call_llm, probe_endpoint, CLOUD_MODELS
-from prompts import (
+from .storage import init_storage, put_object, get_object
+from .audio_analyzer import analyze_audio
+from .llm_router import call_llm, probe_endpoint, CLOUD_MODELS
+from .prompts import (
     SYSTEM_PROMPT,
     build_generate_prompt,
     build_complete_prompt,
     build_polish_prompt,
 )
-from stream_router import stream_llm
+from .stream_router import stream_llm
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")

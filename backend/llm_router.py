@@ -2,7 +2,7 @@
 import os
 import logging
 import httpx
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +30,62 @@ CLOUD_MODELS = {
 async def _call_cloud(
     provider: str, model: str, system: str, user: str, session_id: str
 ) -> str:
-    key = os.environ.get("EMERGENT_LLM_KEY")
-    if not key:
-        raise RuntimeError("EMERGENT_LLM_KEY is not configured on the server")
-    chat = LlmChat(
-        api_key=key, session_id=session_id, system_message=system
-    ).with_model(provider, model)
-    resp = await chat.send_message(UserMessage(text=user))
-    return str(resp)
+    """Call cloud LLM providers directly using environment API keys."""
+    if provider == "openai":
+        key = os.environ.get("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY not found in environment")
+        return await _call_openai_compatible("https://api.openai.com/v1", model, system, user, key)
+    
+    if provider == "anthropic":
+        key = os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise RuntimeError("ANTHROPIC_API_KEY not found in environment")
+        
+        url = "https://api.anthropic.com/v1/messages"
+        headers = {
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "max_tokens": 4096,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+            "temperature": 0.9,
+        }
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            r = await client.post(url, json=payload, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+            return data["content"][0]["text"]
+
+    if provider == "gemini":
+        key = os.environ.get("GOOGLE_API_KEY")
+        if not key:
+            raise RuntimeError("GOOGLE_API_KEY not found in environment")
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": f"System Instruction: {system}\n\nUser: {user}"}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.9,
+                "maxOutputTokens": 4096,
+            }
+        }
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            r = await client.post(url, json=payload)
+            r.raise_for_status()
+            data = r.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+
+    raise RuntimeError(f"Cloud provider {provider} not implemented in direct mode")
 
 
 async def _call_openai_compatible(

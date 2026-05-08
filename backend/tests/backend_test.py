@@ -4,17 +4,19 @@ import time
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://beat-to-lyrics-6.preview.emergentagent.com").rstrip("/")
-API = f"{BASE_URL}/api"
+# Use FastAPI TestClient for local testing
+API = "/api"
+
 
 # Path to the small WAV generated before running tests
-WAV_PATH = "/tmp/test.wav"
+WAV_PATH = "tmp/test.wav"
 
 
 @pytest.fixture(scope="session")
 def client():
-    s = requests.Session()
-    return s
+    from backend.server import app
+    from fastapi.testclient import TestClient
+    return TestClient(app)
 
 
 @pytest.fixture(scope="session")

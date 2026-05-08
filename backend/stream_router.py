@@ -2,9 +2,8 @@
 
 Strategy:
 - For local (ollama/lmstudio): true token streaming via httpx SSE.
-- For cloud (anthropic/openai/gemini via Emergent key): fetch the full response
-  then word-trickle it back to the client as SSE chunks. Same UX without hacking
-  into the emergentintegrations wrapper.
+- For cloud (anthropic/openai/gemini): fetch the full response
+  then word-trickle it back to the client as SSE chunks. Same UX.
 """
 import asyncio
 import json
@@ -13,7 +12,8 @@ import os
 from typing import AsyncIterator, Optional
 
 import httpx
-# Removed emergentintegrations import; cloud providers not supported
+# Direct cloud provider support implemented.
+
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-"""Unified LLM router: supports Emergent cloud (Claude/GPT/Gemini), Ollama, LM Studio."""
+"""Unified LLM router: supports cloud providers (Claude/GPT/Gemini), Ollama, LM Studio."""
 import os
 import logging
 import httpx

@@ -315,64 +315,63 @@ async def background_analyze(song_id: str, file_path: str):
         logger.info(f"Analysis complete for {song_id}")
     except Exception as e:
         logger.error(f"Background analysis failed for {song_id}: {e}")
-
 @api.post("/songs/upload", response_model=Song)
 async def upload_song(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str = Form(""),
 ):
-    """Upload a song, stream it to disk, and trigger low‑memory background analysis."""
+    """Upload a song, save to disk, and trigger low-memory background analysis."""
     if not file.filename:
         raise HTTPException(400, "filename required")
 
-    # Generate IDs and paths
+    # Read the upload into memory (same as before — upload itself is not the OOM cause)
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty file")
+
     song_id = str(uuid.uuid4())
     storage_path = f"songs/{song_id}/{file.filename}"
     content_type = file.content_type or "audio/mpeg"
 
-    # Ensure local temporary directory exists
-    import os
-    tmp_dir = os.path.join(os.getcwd(), "tmp_uploads")
-    os.makedirs(tmp_dir, exist_ok=True)
-    local_file_path = os.path.join(tmp_dir, f"{song_id}_{file.filename}")
-
-    # Stream upload to local disk in 1 MB chunks
+    # Save to persistent storage (S3 or local)
     try:
-        with open(local_file_path, "wb") as out_file:
-            while True:
-                chunk = await file.read(1024 * 1024)  # 1 MB
-                if not chunk:
-                    break
-                out_file.write(chunk)
-    except Exception as e:
-        logger.exception("Failed to write upload to disk")
-        raise HTTPException(502, f"Disk write failed: {e}") from e
-
-    # Upload the full content to storage (S3/Local) using the same file
-    try:
-        with open(local_file_path, "rb") as f:
-            put_object(storage_path, f.read(), content_type)
+        put_object(storage_path, content, content_type)
     except Exception as e:
         logger.exception("Storage upload failed")
         raise HTTPException(502, f"Storage upload failed: {e}") from e
 
-    # Create song record (size is file size on disk)
-    size = os.path.getsize(local_file_path)
+    # Also write to a temp file on disk so the analyzer reads from a path, not RAM
+    import os
+    tmp_dir = os.path.join(os.getcwd(), "tmp_uploads")
+    os.makedirs(tmp_dir, exist_ok=True)
+    local_file_path = os.path.join(tmp_dir, f"{song_id}_{file.filename}")
+    try:
+        with open(local_file_path, "wb") as out_file:
+            out_file.write(content)
+    except Exception as e:
+        logger.exception("Failed to write temp file for analysis")
+        # Non-fatal: analysis will just fail gracefully
+        local_file_path = None
+
+    # Free the bytes from RAM now that they're on disk
+    del content
+
     song = Song(
         id=song_id,
         title=title or file.filename.rsplit(".", 1)[0],
         original_filename=file.filename,
         storage_path=storage_path,
         content_type=content_type,
-        size=size,
+        size=os.path.getsize(local_file_path) if local_file_path else 0,
         created_at=now_iso(),
         updated_at=now_iso(),
     )
     await db.songs.insert_one(song.model_dump())
 
-    # Trigger low‑memory analysis using the saved file path
-    background_tasks.add_task(background_analyze, song_id, local_file_path)
+    # Trigger analysis in background using file path (low memory)
+    if local_file_path:
+        background_tasks.add_task(background_analyze, song_id, local_file_path)
 
     return song
 

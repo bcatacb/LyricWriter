@@ -1,15 +1,17 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
+import axios from "axios";
 
 const SettingsContext = createContext(null);
 
-const LS_KEY = "lyricist.settings.v1";
+const LS_KEY = "lyricist.settings.v2";
+const BACKEND_API = process.env.REACT_APP_BACKEND_URL + "/api";
 
 const defaultSettings = {
-    provider: "anthropic",
-    model: "claude-sonnet-4-5-20250929",
+    provider: "lmstudio",
+    model: "hermes-3-llama-3.1-8b",
     endpoints: {
         ollama: "http://localhost:11434",
-        lmstudio: "http://localhost:1234/v1",
+        lmstudio: "https://desktop-pslrnct.tail763538.ts.net",
     },
     localApiKey: "",
     localModels: {
@@ -27,11 +29,45 @@ export function SettingsProvider({ children }) {
         return defaultSettings;
     });
 
+    const [availableModels, setAvailableModels] = useState([]);
+
+    // Sync to localStorage
     useEffect(() => {
-        try {
-            localStorage.setItem(LS_KEY, JSON.stringify(settings));
-        } catch {}
+        localStorage.setItem(LS_KEY, JSON.stringify(settings));
     }, [settings]);
+
+    // Initial load: Fetch global defaults from backend
+    useEffect(() => {
+        axios.get(`${BACKEND_API}/settings`).then(r => {
+            if (r.data.lmstudio_endpoint) {
+                update({
+                    endpoints: {
+                        ollama: r.data.ollama_endpoint || settings.endpoints.ollama,
+                        lmstudio: r.data.lmstudio_endpoint || settings.endpoints.lmstudio,
+                    }
+                });
+            }
+        }).catch(e => console.warn("Failed to fetch global settings", e));
+    }, []);
+
+    // Auto-probe models when endpoint or provider changes
+    useEffect(() => {
+        const isLocal = settings.provider === "ollama" || settings.provider === "lmstudio";
+        if (isLocal) {
+            const endpoint = settings.endpoints[settings.provider];
+            if (endpoint) {
+                axios.get(`${BACKEND_API}/probe?endpoint=${encodeURIComponent(endpoint)}`)
+                    .then(r => {
+                        if (r.data.ok) {
+                            setAvailableModels(r.data.models || []);
+                        }
+                    })
+                    .catch(() => setAvailableModels([]));
+            }
+        } else {
+            setAvailableModels([]);
+        }
+    }, [settings.provider, settings.endpoints.ollama, settings.endpoints.lmstudio]);
 
     const update = (patch) => setSettings((s) => ({ ...s, ...patch }));
 
@@ -49,7 +85,7 @@ export function SettingsProvider({ children }) {
     };
 
     return (
-        <SettingsContext.Provider value={{ settings, update, resolveForRequest }}>
+        <SettingsContext.Provider value={{ settings, update, resolveForRequest, availableModels }}>
             {children}
         </SettingsContext.Provider>
     );

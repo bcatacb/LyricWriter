@@ -108,6 +108,34 @@ class Draft(BaseModel):
     lyrics: str
     source: str  # 'generate' | 'complete' | 'polish' | 'manual'
     params: dict = Field(default_factory=dict)
+
+class SystemSettings(BaseModel):
+    lmstudio_endpoint: str = "https://desktop-pslrnct.tail763538.ts.net"
+    ollama_endpoint: str = "http://localhost:11434"
+
+@api.get("/settings")
+async def get_settings():
+    s = await db.settings.find_one({"id": "global"})
+    if not s:
+        return {"lmstudio_endpoint": "https://desktop-pslrnct.tail763538.ts.net", "ollama_endpoint": "http://localhost:11434"}
+    # Convert Mongo _id etc
+    return {
+        "lmstudio_endpoint": s.get("lmstudio_endpoint", "https://desktop-pslrnct.tail763538.ts.net"),
+        "ollama_endpoint": s.get("ollama_endpoint", "http://localhost:11434")
+    }
+
+@api.post("/settings")
+async def update_settings(s: SystemSettings):
+    await db.settings.update_one(
+        {"id": "global"},
+        {"$set": s.model_dump()},
+        upsert=True
+    )
+    return {"status": "ok"}
+
+@api.get("/probe")
+async def probe_llm(endpoint: str = Query(...)):
+    return await probe_endpoint(endpoint)
     is_approved: bool = False
     created_at: str
 

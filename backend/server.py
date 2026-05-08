@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from .storage import init_storage, put_object, get_object
-from .audio_analyzer import analyze_audio
+from .audio_analyzer import analyze_file
 from .llm_router import call_llm, probe_endpoint, CLOUD_MODELS
 from .prompts import (
     SYSTEM_PROMPT,
@@ -303,11 +303,11 @@ async def shutdown():
 async def root():
     return {"app": "AI Lyricist", "status": "ok"}
 
-async def background_analyze(song_id: str, data: bytes):
-    """Background task to analyze audio without blocking the HTTP response."""
+async def background_analyze(song_id: str, file_path: str):
+    """Background task to analyze audio from a file path, avoiding loading whole file into memory."""
     try:
-        logger.info(f"Starting background analysis for {song_id}")
-        results = analyze_audio(data)
+        logger.info(f"Starting background analysis for {song_id} using {file_path}")
+        results = analyze_file(file_path)
         await db.songs.update_one(
             {"id": song_id},
             {"$set": {"audio": results, "updated_at": now_iso()}}
@@ -322,43 +322,58 @@ async def upload_song(
     file: UploadFile = File(...),
     title: str = Form(""),
 ):
-    """Upload a song and trigger background analysis."""
+    """Upload a song, stream it to disk, and trigger low‑memory background analysis."""
     if not file.filename:
         raise HTTPException(400, "filename required")
-        
-    content = await file.read()
-    if len(content) == 0:
-        raise HTTPException(400, "Empty file")
-        
-    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "mp3"
+
+    # Generate IDs and paths
     song_id = str(uuid.uuid4())
     storage_path = f"songs/{song_id}/{file.filename}"
     content_type = file.content_type or "audio/mpeg"
 
+    # Ensure local temporary directory exists
+    import os
+    tmp_dir = os.path.join(os.getcwd(), "tmp_uploads")
+    os.makedirs(tmp_dir, exist_ok=True)
+    local_file_path = os.path.join(tmp_dir, f"{song_id}_{file.filename}")
+
+    # Stream upload to local disk in 1 MB chunks
     try:
-        # Save to storage (S3/Local)
-        await put_object(storage_path, content)
+        with open(local_file_path, "wb") as out_file:
+            while True:
+                chunk = await file.read(1024 * 1024)  # 1 MB
+                if not chunk:
+                    break
+                out_file.write(chunk)
+    except Exception as e:
+        logger.exception("Failed to write upload to disk")
+        raise HTTPException(502, f"Disk write failed: {e}") from e
+
+    # Upload the full content to storage (S3/Local) using the same file
+    try:
+        with open(local_file_path, "rb") as f:
+            await put_object(storage_path, f.read())
     except Exception as e:
         logger.exception("Storage upload failed")
         raise HTTPException(502, f"Storage upload failed: {e}") from e
 
-    # Create the song record with empty audio features initially
+    # Create song record (size is file size on disk)
+    size = os.path.getsize(local_file_path)
     song = Song(
         id=song_id,
         title=title or file.filename.rsplit(".", 1)[0],
         original_filename=file.filename,
         storage_path=storage_path,
         content_type=content_type,
-        size=len(content),
+        size=size,
         created_at=now_iso(),
         updated_at=now_iso(),
     )
-
     await db.songs.insert_one(song.model_dump())
-    
-    # Trigger analysis in background
-    background_tasks.add_task(background_analyze, song_id, content)
-    
+
+    # Trigger low‑memory analysis using the saved file path
+    background_tasks.add_task(background_analyze, song_id, local_file_path)
+
     return song
 
 

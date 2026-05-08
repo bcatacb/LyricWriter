@@ -96,3 +96,53 @@ def analyze_audio(data: bytes) -> dict:
         "energy": round(energy, 4),
         "mood": mood,
     }
+
+
+def analyze_file(file_path: str) -> dict:
+    """Analyze audio from a file path, using low memory settings.
+    Mirrors analyze_audio but reads directly from disk.
+    """
+    try:
+        y, sr = librosa.load(file_path, sr=11025, mono=True, duration=300.0)
+    except Exception as e:
+        logger.exception("librosa load failed for %s: %s", file_path, e)
+        return {
+            "bpm": None,
+            "key": None,
+            "mode": None,
+            "duration_sec": None,
+            "energy": None,
+            "mood": None,
+            "error": str(e),
+        }
+
+    duration = float(librosa.get_duration(y=y, sr=sr))
+
+    try:
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        bpm = float(np.asarray(tempo).flatten()[0])
+    except Exception:
+        bpm = 0.0
+
+    try:
+        note, mode = _detect_key(y, sr)
+    except Exception:
+        note, mode = "C", "major"
+
+    try:
+        rms = librosa.feature.rms(y=y)
+        energy = float(np.mean(rms))
+    except Exception:
+        energy = 0.0
+
+    mood = _infer_mood(bpm, energy, mode)
+
+    return {
+        "bpm": round(bpm, 1) if bpm else None,
+        "key": note,
+        "mode": mode,
+        "duration_sec": round(duration, 2),
+        "energy": round(energy, 4),
+        "mood": mood,
+    }
+

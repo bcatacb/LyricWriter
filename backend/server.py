@@ -340,7 +340,7 @@ async def upload_song(file: UploadFile = File(...), title: str = Form("")):
         raise HTTPException(502, f"Storage upload failed: {e}") from e
 
     # Run librosa in a thread pool so the event loop stays alive during analysis
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     features = await loop.run_in_executor(None, analyze_audio, content)
     features.pop("error", None)
 

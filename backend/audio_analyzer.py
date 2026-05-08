@@ -1,7 +1,13 @@
 """Librosa-based audio analysis: BPM, key, duration, energy, simple mood tag."""
 import io
+import os
 import logging
 import numpy as np
+
+# Disable numba JIT before importing librosa — prevents memory spike on cold start
+# that kills Render's 512MB free-tier process during first analysis.
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+
 import librosa
 
 logger = logging.getLogger(__name__)

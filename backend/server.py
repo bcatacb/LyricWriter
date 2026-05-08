@@ -304,6 +304,29 @@ async def shutdown():
 async def root():
     return {"app": "AI Lyricist", "status": "ok"}
 
+
+@api.get("/probe")
+async def probe_local_models(endpoint: str):
+    """Query a local LM Studio or Ollama endpoint for available models.
+    
+    Returns {ok: true, models: [...]} on success, {ok: false, models: []} on failure.
+    Used by the frontend to populate the model dropdown instead of a text input.
+    """
+    import httpx
+    try:
+        url = endpoint.rstrip("/") + "/v1/models"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(url)
+        if r.status_code == 200:
+            data = r.json()
+            # OpenAI-compatible /v1/models returns {"data": [{"id": "..."}, ...]}
+            models = [m["id"] for m in data.get("data", [])]
+            return {"ok": True, "models": models}
+        return {"ok": False, "models": []}
+    except Exception as e:
+        logger.warning("probe %s failed: %s", endpoint, e)
+        return {"ok": False, "models": []}
+
 async def background_analyze(song_id: str, data: bytes):
     """Background task to analyze audio without blocking the HTTP response."""
     try:

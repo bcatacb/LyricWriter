@@ -85,11 +85,35 @@ export default function StudioPage() {
                 headers: { "Content-Type": "multipart/form-data" },
                 timeout: 240000,
             });
-            setSong(r.data);
+            
+            const initialSong = r.data;
+            setSong(initialSong);
             setLyrics("");
-            toast.success("Instrumental analyzed", {
-                description: `${r.data.audio?.bpm ? Math.round(r.data.audio.bpm) + " BPM" : "BPM n/a"} · ${r.data.audio?.key || "?"} ${r.data.audio?.mode || ""}`,
-            });
+
+            // If analysis is still pending, start polling
+            if (!initialSong.audio?.bpm) {
+                toast.info("Upload complete", { description: "Analyzing audio in background..." });
+                
+                const interval = setInterval(async () => {
+                    try {
+                        const res = await api.get(`/songs/${initialSong.id}`);
+                        if (res.data.audio?.bpm) {
+                            setSong(res.data);
+                            clearInterval(interval);
+                            toast.success("Analysis complete", {
+                                description: `${Math.round(res.data.audio.bpm)} BPM · ${res.data.audio.key} ${res.data.audio.mode}`,
+                            });
+                        }
+                    } catch (e) {
+                        console.error("Polling failed", e);
+                        clearInterval(interval);
+                    }
+                }, 3000);
+            } else {
+                toast.success("Instrumental analyzed", {
+                    description: `${Math.round(initialSong.audio.bpm)} BPM · ${initialSong.audio.key} ${initialSong.audio.mode}`,
+                });
+            }
         } catch (e) {
             console.error(e);
             toast.error("Upload failed", { description: e?.response?.data?.detail || e.message });

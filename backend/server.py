@@ -14,6 +14,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    BackgroundTasks,
 )
 from fastapi.responses import Response, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -302,56 +303,63 @@ async def shutdown():
 async def root():
     return {"app": "AI Lyricist", "status": "ok"}
 
+async def background_analyze(song_id: str, data: bytes):
+    """Background task to analyze audio without blocking the HTTP response."""
+    try:
+        logger.info(f"Starting background analysis for {song_id}")
+        results = analyze_audio(data)
+        await db.songs.update_one(
+            {"id": song_id},
+            {"$set": {"audio": results, "updated_at": now_iso()}}
+        )
+        logger.info(f"Analysis complete for {song_id}")
+    except Exception as e:
+        logger.error(f"Background analysis failed for {song_id}: {e}")
 
 @api.post("/songs/upload", response_model=Song)
-async def upload_song(file: UploadFile = File(...), title: str = Form("")):
+async def upload_song(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    title: str = Form(""),
+):
+    """Upload a song and trigger background analysis."""
     if not file.filename:
         raise HTTPException(400, "filename required")
+        
     content = await file.read()
-    if len(content) > 30 * 1024 * 1024:
-        raise HTTPException(413, "File too large (>30MB)")
     if len(content) == 0:
         raise HTTPException(400, "Empty file")
-
+        
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "mp3"
     song_id = str(uuid.uuid4())
-    path = f"{APP_NAME}/audio/{song_id}.{ext}"
+    storage_path = f"songs/{song_id}/{file.filename}"
     content_type = file.content_type or "audio/mpeg"
 
     try:
-        result = put_object(path, content, content_type)
+        # Save to storage (S3/Local)
+        await put_object(storage_path, content)
     except Exception as e:
         logger.exception("Storage upload failed")
         raise HTTPException(502, f"Storage upload failed: {e}") from e
 
-    features = analyze_audio(content)
-    features.pop("error", None)
+    # Create the song record with empty audio features initially
+    song = Song(
+        id=song_id,
+        title=title or file.filename.rsplit(".", 1)[0],
+        original_filename=file.filename,
+        storage_path=storage_path,
+        content_type=content_type,
+        size=len(content),
+        created_at=now_iso(),
+        updated_at=now_iso(),
+    )
 
-    doc = {
-        "id": song_id,
-        "title": title or file.filename.rsplit(".", 1)[0],
-        "original_filename": file.filename,
-        "storage_path": result["path"],
-        "content_type": content_type,
-        "size": result.get("size", len(content)),
-        "audio": {
-            "bpm": features.get("bpm"),
-            "key": features.get("key"),
-            "mode": features.get("mode"),
-            "duration_sec": features.get("duration_sec"),
-            "energy": features.get("energy"),
-            "mood": features.get("mood"),
-        },
-        "genre": None,
-        "tags": [],
-        "notes": None,
-        "is_deleted": False,
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
-    }
-    await db.songs.insert_one(doc)
-    doc.pop("_id", None)
-    return Song(**doc)
+    await db.songs.insert_one(song.model_dump())
+    
+    # Trigger analysis in background
+    background_tasks.add_task(background_analyze, song_id, content)
+    
+    return song
 
 
 @api.get("/songs", response_model=List[Song])

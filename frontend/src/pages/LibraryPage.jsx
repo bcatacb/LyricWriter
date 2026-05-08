@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { MagnifyingGlassIcon, VinylRecordIcon, TrashIcon } from "@phosphor-icons/react";
 import { api } from "../lib/api";
@@ -16,7 +16,7 @@ export default function LibraryPage() {
     const [loading, setLoading] = useState(true);
     const [confirmId, setConfirmId] = useState(null);
 
-    const fetchList = async () => {
+    const fetchList = useCallback(async () => {
         setLoading(true);
         try {
             const params = {};
@@ -31,14 +31,16 @@ export default function LibraryPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [q, mood, minBpm, maxBpm]);
 
-    useEffect(() => { fetchList(); /* eslint-disable-next-line */ }, []);
+    useEffect(() => {
+        fetchList();
+    }, [fetchList]);
+
     useEffect(() => {
         const t = setTimeout(fetchList, 300);
         return () => clearTimeout(t);
-        // eslint-disable-next-line
-    }, [q, mood, minBpm, maxBpm]);
+    }, [fetchList]);
 
     const handleDelete = async (e, id) => {
         e.preventDefault();

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -26,7 +26,7 @@ export default function SongDetailPage() {
     const [confirmDraftId, setConfirmDraftId] = useState(null);
     const [shareOpen, setShareOpen] = useState(false);
 
-    const fetchAll = async () => {
+    const fetchAll = useCallback(async () => {
         try {
             const [s, d] = await Promise.all([
                 api.get(`/songs/${id}`),
@@ -47,9 +47,11 @@ export default function SongDetailPage() {
         } catch (e) {
             toast.error("Failed to load song");
         }
-    };
+    }, [id]);
 
-    useEffect(() => { fetchAll(); /* eslint-disable-next-line */ }, [id]);
+    useEffect(() => {
+        fetchAll();
+    }, [fetchAll]);
 
     const audioUrl = useMemo(() => (song ? `${BACKEND_URL}/api/songs/${song.id}/audio` : null), [song]);
     const selectedDraft = drafts.find((d) => d.id === selectedDraftId);

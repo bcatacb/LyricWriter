@@ -90,7 +90,7 @@ export default function ProviderSelector({ compact = false }) {
             </div>
             {isLocal && (
                 <div className="text-[10px] font-mono text-[#666] mt-1" data-testid="provider-local-endpoint-info">
-                    Endpoint: {settings.endpoints[settings.provider]} — change in Providers page
+                    <span className="text-[#39FF14]">{settings.endpoints[settings.provider]}</span>
                 </div>
             )}
         </div>

@@ -435,7 +435,27 @@ export default function StudioPage() {
                                 <div className="font-display text-lg font-bold text-[#39FF14] uppercase tracking-tight">
                                     Control Room
                                 </div>
-                                <ProviderSelector />
+                                <div className="space-y-3">
+                                    <ProviderSelector />
+                                    {(settings.provider === "ollama" || settings.provider === "lmstudio") && (
+                                        <div className="space-y-1">
+                                            <div className="text-[10px] font-mono tracking-[0.25em] uppercase text-[#666]">
+                                                Local Endpoint
+                                            </div>
+                                            <input
+                                                value={settings.endpoints[settings.provider]}
+                                                onChange={(e) => update({
+                                                    endpoints: {
+                                                        ...settings.endpoints,
+                                                        [settings.provider]: e.target.value
+                                                    }
+                                                })}
+                                                placeholder="e.g. https://my-tunnel.ngrok-free.app"
+                                                className="w-full bg-[#0A0A0A] border border-[#222] text-[#39FF14] px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#39FF14]"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
 
                                 <Field label="Theme / Subject">
                                     <input

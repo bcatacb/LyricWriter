@@ -54,7 +54,7 @@ def analyze_audio(data: bytes) -> dict:
     """Analyze raw audio bytes. Returns dict with bpm, key, mode, duration_sec, energy, mood."""
     try:
         # Restore full song analysis (up to 5 mins) at a safe sample rate
-        y, sr = librosa.load(io.BytesIO(data), sr=8000, mono=True, duration=30.0)
+        y, sr = librosa.load(io.BytesIO(data), sr=8000, mono=True, duration=180.0)
     except Exception as e:
         logger.exception("librosa load failed: %s", e)
         return {

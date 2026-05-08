@@ -352,7 +352,7 @@ async def upload_song(
     # Upload the full content to storage (S3/Local) using the same file
     try:
         with open(local_file_path, "rb") as f:
-            await put_object(storage_path, f.read(), content_type)
+            put_object(storage_path, f.read(), content_type)
     except Exception as e:
         logger.exception("Storage upload failed")
         raise HTTPException(502, f"Storage upload failed: {e}") from e

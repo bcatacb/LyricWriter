@@ -47,7 +47,7 @@ const SECTION_PALETTE = ["VERSE", "PRE-CHORUS", "CHORUS", "BRIDGE", "HOOK", "OUT
 
 export default function StudioPage() {
     const navigate = useNavigate();
-    const { resolveForRequest } = useSettings();
+    const { settings, update, resolveForRequest } = useSettings();
 
     const [song, setSong] = useState(null);
     const [uploading, setUploading] = useState(false);

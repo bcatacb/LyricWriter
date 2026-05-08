@@ -18,7 +18,8 @@ _NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 def _detect_key(y: np.ndarray, sr: int) -> tuple[str, str]:
     """Return (note, mode) like ('C', 'major')."""
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+    # Use chroma_stft instead of chroma_cqt (much less memory/CPU)
+    chroma = librosa.feature.chroma_stft(y=y, sr=sr, n_fft=2048)
     chroma_avg = chroma.mean(axis=1)
     # normalize
     chroma_avg = chroma_avg / (chroma_avg.sum() + 1e-9)
@@ -52,8 +53,8 @@ def _infer_mood(bpm: float, energy: float, mode: str) -> str:
 def analyze_audio(data: bytes) -> dict:
     """Analyze raw audio bytes. Returns dict with bpm, key, mode, duration_sec, energy, mood."""
     try:
-        # librosa.load expects a filelike or path; BytesIO works for most formats via soundfile/audioread
-        y, sr = librosa.load(io.BytesIO(data), sr=22050, mono=True, duration=120.0)
+        # Optimization: sr=11025 (half) and duration=45.0 (quarter) to fit in 512MB RAM
+        y, sr = librosa.load(io.BytesIO(data), sr=11025, mono=True, duration=45.0)
     except Exception as e:
         logger.exception("librosa load failed: %s", e)
         return {

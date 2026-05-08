@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from .storage import init_storage, put_object, get_object
-from .audio_analyzer import analyze_file
+from .audio_analyzer import analyze_audio
 from .llm_router import call_llm, probe_endpoint, CLOUD_MODELS
 from .prompts import (
     SYSTEM_PROMPT,
@@ -303,11 +303,11 @@ async def shutdown():
 async def root():
     return {"app": "AI Lyricist", "status": "ok"}
 
-async def background_analyze(song_id: str, file_path: str):
-    """Background task to analyze audio from a file path, avoiding loading whole file into memory."""
+async def background_analyze(song_id: str, data: bytes):
+    """Background task to analyze audio without blocking the HTTP response."""
     try:
-        logger.info(f"Starting background analysis for {song_id} using {file_path}")
-        results = analyze_file(file_path)
+        logger.info(f"Starting background analysis for {song_id}")
+        results = analyze_audio(data)
         await db.songs.update_one(
             {"id": song_id},
             {"$set": {"audio": results, "updated_at": now_iso()}}
@@ -321,11 +321,10 @@ async def upload_song(
     file: UploadFile = File(...),
     title: str = Form(""),
 ):
-    """Upload a song, save to disk, and trigger low-memory background analysis."""
+    """Upload a song and trigger background analysis."""
     if not file.filename:
         raise HTTPException(400, "filename required")
 
-    # Read the upload into memory (same as before — upload itself is not the OOM cause)
     content = await file.read()
     if not content:
         raise HTTPException(400, "Empty file")
@@ -334,28 +333,11 @@ async def upload_song(
     storage_path = f"songs/{song_id}/{file.filename}"
     content_type = file.content_type or "audio/mpeg"
 
-    # Save to persistent storage (S3 or local)
     try:
         put_object(storage_path, content, content_type)
     except Exception as e:
         logger.exception("Storage upload failed")
         raise HTTPException(502, f"Storage upload failed: {e}") from e
-
-    # Also write to a temp file on disk so the analyzer reads from a path, not RAM
-    import os
-    tmp_dir = os.path.join(os.getcwd(), "tmp_uploads")
-    os.makedirs(tmp_dir, exist_ok=True)
-    local_file_path = os.path.join(tmp_dir, f"{song_id}_{file.filename}")
-    try:
-        with open(local_file_path, "wb") as out_file:
-            out_file.write(content)
-    except Exception as e:
-        logger.exception("Failed to write temp file for analysis")
-        # Non-fatal: analysis will just fail gracefully
-        local_file_path = None
-
-    # Free the bytes from RAM now that they're on disk
-    del content
 
     song = Song(
         id=song_id,
@@ -363,15 +345,13 @@ async def upload_song(
         original_filename=file.filename,
         storage_path=storage_path,
         content_type=content_type,
-        size=os.path.getsize(local_file_path) if local_file_path else 0,
+        size=len(content),
         created_at=now_iso(),
         updated_at=now_iso(),
     )
     await db.songs.insert_one(song.model_dump())
 
-    # Trigger analysis in background using file path (low memory)
-    if local_file_path:
-        background_tasks.add_task(background_analyze, song_id, local_file_path)
+    background_tasks.add_task(background_analyze, song_id, content)
 
     return song
 

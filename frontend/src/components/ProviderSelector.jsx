@@ -3,7 +3,7 @@ import { CLOUD_PROVIDERS, LOCAL_PROVIDERS } from "../lib/api";
 import { useSettings } from "../lib/settings";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
-export function ProviderSelector() {
+export default function ProviderSelector() {
     const { settings, update, availableModels } = useSettings();
 
     const isLocal = settings.provider === "ollama" || settings.provider === "lmstudio";

@@ -136,6 +136,10 @@ async def update_settings(s: SystemSettings):
 @api.get("/probe")
 async def probe_llm(endpoint: str = Query(...)):
     return await probe_endpoint(endpoint)
+
+@api.get("/ping")
+async def ping():
+    return {"status": "pong"}
     is_approved: bool = False
     created_at: str
 

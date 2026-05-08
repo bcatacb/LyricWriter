@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useEffect } from "react";
+import axios from "axios";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
@@ -11,6 +12,8 @@ import SongDetailPage from "@/pages/SongDetailPage";
 import StylesPage from "@/pages/StylesPage";
 import SettingsPage from "@/pages/SettingsPage";
 import SharePage from "@/pages/SharePage";
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
 function Chrome() {
     const loc = useLocation();
@@ -40,6 +43,13 @@ function Chrome() {
 }
 
 function App() {
+    // Wake-up call for the server (Render free tier cold starts)
+    useEffect(() => {
+        if (BACKEND_URL) {
+            axios.get(`${BACKEND_URL}/api/ping`).catch(() => {});
+        }
+    }, []);
+
     return (
         <div className="App min-h-screen text-[#EDEDED]">
             <SettingsProvider>

@@ -788,6 +788,11 @@ async def share_audio(slug: str):
     return Response(content=data, media_type=song.get("content_type") or ct)
 
 
+@app.get("/healthz")
+async def health_check():
+    return {"status": "ok"}
+
+
 app.include_router(api)
 
 app.add_middleware(

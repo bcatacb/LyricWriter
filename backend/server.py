@@ -1,5 +1,6 @@
 """AI Lyricist & Digital Songbook — main FastAPI app."""
 import os
+import asyncio
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -338,8 +339,9 @@ async def upload_song(file: UploadFile = File(...), title: str = Form("")):
         logger.exception("Storage upload failed")
         raise HTTPException(502, f"Storage upload failed: {e}") from e
 
-    # Analyze inline — synchronous, returns complete results immediately
-    features = analyze_audio(content)
+    # Run librosa in a thread pool so the event loop stays alive during analysis
+    loop = asyncio.get_event_loop()
+    features = await loop.run_in_executor(None, analyze_audio, content)
     features.pop("error", None)
 
     song = Song(

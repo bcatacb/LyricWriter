@@ -53,8 +53,8 @@ def _infer_mood(bpm: float, energy: float, mode: str) -> str:
 def analyze_audio(data: bytes) -> dict:
     """Analyze raw audio bytes. Returns dict with bpm, key, mode, duration_sec, energy, mood."""
     try:
-        # Extreme Optimization: sr=8000 and duration=30.0 to fit in 512MB RAM
-        y, sr = librosa.load(io.BytesIO(data), sr=8000, mono=True, duration=30.0)
+        # Restore full song analysis (up to 5 mins) at a safe sample rate
+        y, sr = librosa.load(io.BytesIO(data), sr=11025, mono=True, duration=300.0)
     except Exception as e:
         logger.exception("librosa load failed: %s", e)
         return {

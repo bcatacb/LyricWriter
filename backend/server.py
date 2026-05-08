@@ -316,19 +316,18 @@ async def background_analyze(song_id: str, data: bytes):
     except Exception as e:
         logger.error(f"Background analysis failed for {song_id}: {e}")
 @api.post("/songs/upload", response_model=Song)
-async def upload_song(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    title: str = Form(""),
-):
-    """Upload a song and trigger background analysis."""
+async def upload_song(file: UploadFile = File(...), title: str = Form("")):
+    """Upload a song and analyze it synchronously (proven working approach)."""
     if not file.filename:
         raise HTTPException(400, "filename required")
 
     content = await file.read()
-    if not content:
+    if len(content) > 30 * 1024 * 1024:
+        raise HTTPException(413, "File too large (>30MB)")
+    if len(content) == 0:
         raise HTTPException(400, "Empty file")
 
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "mp3"
     song_id = str(uuid.uuid4())
     storage_path = f"songs/{song_id}/{file.filename}"
     content_type = file.content_type or "audio/mpeg"
@@ -339,6 +338,10 @@ async def upload_song(
         logger.exception("Storage upload failed")
         raise HTTPException(502, f"Storage upload failed: {e}") from e
 
+    # Analyze inline — synchronous, returns complete results immediately
+    features = analyze_audio(content)
+    features.pop("error", None)
+
     song = Song(
         id=song_id,
         title=title or file.filename.rsplit(".", 1)[0],
@@ -346,14 +349,20 @@ async def upload_song(
         storage_path=storage_path,
         content_type=content_type,
         size=len(content),
+        audio=AudioFeatures(
+            bpm=features.get("bpm"),
+            key=features.get("key"),
+            mode=features.get("mode"),
+            duration_sec=features.get("duration_sec"),
+            energy=features.get("energy"),
+            mood=features.get("mood"),
+        ),
         created_at=now_iso(),
         updated_at=now_iso(),
     )
     await db.songs.insert_one(song.model_dump())
-
-    background_tasks.add_task(background_analyze, song_id, content)
-
     return song
+
 
 
 @api.get("/songs", response_model=List[Song])

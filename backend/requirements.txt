@@ -56,7 +56,7 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 lazy-loader==0.5
 librosa==0.11.0
-miniaudio==1.62
+miniaudio==1.71
 librt==0.8.1
 litellm==1.80.0
 llvmlite==0.47.0

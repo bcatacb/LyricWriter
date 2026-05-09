@@ -1,12 +1,7 @@
 """Librosa-based audio analysis: BPM, key, duration, energy, simple mood tag."""
-import os
+import io
 import logging
 import numpy as np
-import miniaudio
-
-# Disable numba JIT to avoid memory spike on Render's 512MB free-tier.
-os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
-
 import librosa
 
 logger = logging.getLogger(__name__)
@@ -58,22 +53,10 @@ def _infer_mood(bpm: float, energy: float, mode: str) -> str:
 def analyze_audio(data: bytes) -> dict:
     """Analyze raw audio bytes. Returns dict with bpm, key, mode, duration_sec, energy, mood."""
     try:
-        # Use miniaudio to decode — handles MP3/WAV/OGG/FLAC without system ffmpeg.
-        # Output is float32 mono at 8 kHz, capped to 60 seconds.
-        SR = 8000
-        MAX_FRAMES = SR * 60
-        decoded = miniaudio.decode(
-            data,
-            nchannels=1,
-            sample_rate=SR,
-            output_format=miniaudio.SampleFormat.FLOAT32,
-        )
-        y = np.frombuffer(decoded.samples, dtype=np.float32).copy()
-        if len(y) > MAX_FRAMES:
-            y = y[:MAX_FRAMES]
-        sr = SR
+        # sr=8000 and duration=30.0 — proven working on Render 512MB
+        y, sr = librosa.load(io.BytesIO(data), sr=8000, mono=True, duration=30.0)
     except Exception as e:
-        logger.exception("miniaudio decode failed: %s", e)
+        logger.exception("librosa load failed: %s", e)
         return {
             "bpm": None,
             "key": None,
@@ -113,53 +96,3 @@ def analyze_audio(data: bytes) -> dict:
         "energy": round(energy, 4),
         "mood": mood,
     }
-
-
-def analyze_file(file_path: str) -> dict:
-    """Analyze audio from a file path, using low memory settings.
-    Mirrors analyze_audio but reads directly from disk.
-    """
-    try:
-        y, sr = librosa.load(file_path, sr=11025, mono=True, duration=300.0)
-    except Exception as e:
-        logger.exception("librosa load failed for %s: %s", file_path, e)
-        return {
-            "bpm": None,
-            "key": None,
-            "mode": None,
-            "duration_sec": None,
-            "energy": None,
-            "mood": None,
-            "error": str(e),
-        }
-
-    duration = float(librosa.get_duration(y=y, sr=sr))
-
-    try:
-        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-        bpm = float(np.asarray(tempo).flatten()[0])
-    except Exception:
-        bpm = 0.0
-
-    try:
-        note, mode = _detect_key(y, sr)
-    except Exception:
-        note, mode = "C", "major"
-
-    try:
-        rms = librosa.feature.rms(y=y)
-        energy = float(np.mean(rms))
-    except Exception:
-        energy = 0.0
-
-    mood = _infer_mood(bpm, energy, mode)
-
-    return {
-        "bpm": round(bpm, 1) if bpm else None,
-        "key": note,
-        "mode": mode,
-        "duration_sec": round(duration, 2),
-        "energy": round(energy, 4),
-        "mood": mood,
-    }
-

@@ -1,11 +1,10 @@
 """Librosa-based audio analysis: BPM, key, duration, energy, simple mood tag."""
-import io
 import os
 import logging
 import numpy as np
+import miniaudio
 
-# Disable numba JIT before importing librosa — prevents memory spike on cold start
-# that kills Render's 512MB free-tier process during first analysis.
+# Disable numba JIT to avoid memory spike on Render's 512MB free-tier.
 os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 
 import librosa
@@ -59,10 +58,22 @@ def _infer_mood(bpm: float, energy: float, mode: str) -> str:
 def analyze_audio(data: bytes) -> dict:
     """Analyze raw audio bytes. Returns dict with bpm, key, mode, duration_sec, energy, mood."""
     try:
-        # Restore full song analysis (up to 5 mins) at a safe sample rate
-        y, sr = librosa.load(io.BytesIO(data), sr=8000, mono=True, duration=60.0)
+        # Use miniaudio to decode — handles MP3/WAV/OGG/FLAC without system ffmpeg.
+        # Output is float32 mono at 8 kHz, capped to 60 seconds.
+        SR = 8000
+        MAX_FRAMES = SR * 60
+        decoded = miniaudio.decode(
+            data,
+            nchannels=1,
+            sample_rate=SR,
+            output_format=miniaudio.SampleFormat.FLOAT32,
+        )
+        y = np.frombuffer(decoded.samples, dtype=np.float32).copy()
+        if len(y) > MAX_FRAMES:
+            y = y[:MAX_FRAMES]
+        sr = SR
     except Exception as e:
-        logger.exception("librosa load failed: %s", e)
+        logger.exception("miniaudio decode failed: %s", e)
         return {
             "bpm": None,
             "key": None,
